@@ -149,18 +149,10 @@ update_menu() {
 }
 
 legacy_version() {
-    echo -n "Enter the panel version (like 2.4.0):"
-    read -r tag_version
-
-    if [ -z "$tag_version" ]; then
-        echo "Panel version cannot be empty. Exiting."
-        exit 1
-    fi
-    # Use the entered panel version in the download link
-    install_command="bash <(curl -Ls "https://raw.githubusercontent.com/mhsanaei/3x-ui/v$tag_version/install.sh") v$tag_version"
-
-    echo "Downloading and installing panel version $tag_version..."
-    eval $install_command
+    echo -e "${yellow}此为视频教程固定版本 v2.9.4，不提供其他旧版本安装。${plain}"
+    echo -e "${yellow}如需重新安装 v2.9.4，请使用以下命令：${plain}"
+    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/kjxv/3x-ui/video-v2.9.4/install.sh)${plain}"
+    before_show_menu
 }
 
 # Function to handle the deletion of the script file
