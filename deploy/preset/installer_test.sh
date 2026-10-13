@@ -95,9 +95,16 @@ snapshot={"nodes":c.execute("SELECT tag,settings,stream_settings FROM inbounds O
           "settings":c.execute("SELECT key,value FROM settings WHERE key IN (?,?,?) ORDER BY key",("xrayTemplateConfig","subClashEnable","kjxvTutorialPresetV1")).fetchall()}
 before=json.load(open("/tmp/before.json"))
 def canonical(snapshot):
-    return {"nodes":[[tag,json.loads(settings),json.loads(stream)] for tag,settings,stream in snapshot["nodes"]],
-            "settings":[[key,json.loads(value)] for key,value in snapshot["settings"]]}
-assert canonical(snapshot) == canonical(before), "Reinstall changed configuration: " + repr({"before":canonical(before),"after":canonical(snapshot)})
+    nodes=[]
+    for tag,settings,stream in snapshot["nodes"]:
+        settings=json.loads(settings)
+        # Background client synchronization refreshes audit timestamps.
+        # Compare every persistent connection setting, excluding only that clock.
+        for client in settings["clients"]:
+            client.pop("updated_at",None)
+        nodes.append([tag,settings,json.loads(stream)])
+    return {"nodes":nodes,"settings":[[key,json.loads(value)] for key,value in snapshot["settings"]]}
+assert canonical(snapshot) == canonical(before), "Reinstall changed persistent connection settings"
 PY
 echo "PASS: full installer, failed-first-install retry, random admin credentials, two-node Clash subscription, repeat install preserves residential credentials and subscription settings."
 '
