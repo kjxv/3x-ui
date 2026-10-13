@@ -1419,15 +1419,15 @@ install_x-ui() {
     if [[ -f "$preset_pending" ]] || [[ ! -e "${xui_folder}/x-ui" && ! -e "${XUI_DB_FOLDER:-/etc/x-ui}/x-ui.db" ]]; then
         preset_first_install=1
     fi
-    if [[ $# -gt 0 && "$1" != "v3.6.0-preset.1" ]]; then
-        echo "This tutorial installer only installs v3.6.0-preset.1." >&2
+    if [[ $# -gt 0 && "$1" != "v3.6.0-preset.2" ]]; then
+        echo "This tutorial installer only installs v3.6.0-preset.2." >&2
         exit 1
     fi
     cd ${xui_folder%/x-ui}/
 
     # Download resources
     if [ $# == 0 ]; then
-        tag_version="v3.6.0-preset.1"
+        tag_version="v3.6.0-preset.2"
         if [[ ! -n "$tag_version" ]]; then
             echo -e "${red}Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later${plain}"
             exit 1
@@ -1476,7 +1476,7 @@ install_x-ui() {
     fi
     local preset_archive="${xui_folder}-linux-$(arch).tar.gz"
     local preset_checksums="${preset_archive}.checksums.$$"
-    if ! curl -fLsS --retry 5 -o "$preset_checksums" "https://github.com/kjxv/3x-ui/releases/download/v3.6.0-preset.1/checksums.txt"; then
+    if ! curl -fLsS --retry 5 -o "$preset_checksums" "https://github.com/kjxv/3x-ui/releases/download/v3.6.0-preset.2/checksums.txt"; then
         echo "Cannot download preset checksums; existing installation was preserved." >&2
         exit 1
     fi
@@ -1489,7 +1489,7 @@ install_x-ui() {
     fi
     local xui_script_temp="/usr/bin/x-ui-temp.$$"
     rm -f "${xui_script_temp}"
-    curl -fLRo "${xui_script_temp}" https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.1/x-ui.sh
+    curl -fLRo "${xui_script_temp}" https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/x-ui.sh
     if [[ $? -ne 0 ]]; then
         rm -f "${xui_script_temp}"
         echo -e "${red}Failed to download x-ui.sh${plain}"
@@ -1564,9 +1564,13 @@ install_x-ui() {
     mkdir -p /var/log/x-ui
     if [[ "$preset_first_install" == "1" ]]; then
         mkdir -p "${XUI_DB_FOLDER:-/etc/x-ui}" || exit 1
-        (umask 077; printf '%s\n' "v3.6.0-preset.1" > "$preset_pending") || exit 1
+        (umask 077; printf '%s\n' "v3.6.0-preset.2" > "$preset_pending") || exit 1
     fi
     config_after_install
+    # ACME installation changes the shell directory to the user's home.
+    # Restore the bundle directory before Xray reads bin/geoip.dat and before
+    # installing the service unit shipped in this same fixed release.
+    cd "$xui_folder" || { echo "Cannot enter installed x-ui directory." >&2; exit 1; }
     if [[ "$preset_first_install" == "1" ]]; then
         # SSL setup can have started the service. Stop it before reserving ports
         # and writing the complete initial profile, then let the installer start it.
@@ -1612,7 +1616,7 @@ install_x-ui() {
     if [[ $release == "alpine" ]]; then
         xui_rc_temp="/etc/init.d/x-ui.tmp.$$"
         rm -f "${xui_rc_temp}"
-        curl -fLRo "${xui_rc_temp}" https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.1/x-ui.rc
+        curl -fLRo "${xui_rc_temp}" https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/x-ui.rc
         if [[ $? -ne 0 ]]; then
             rm -f "${xui_rc_temp}"
             echo -e "${red}Failed to download x-ui.rc${plain}"
@@ -1677,13 +1681,13 @@ install_x-ui() {
             echo -e "${yellow}Service files not found in tar.gz, downloading from GitHub...${plain}"
             case "${release}" in
                 ubuntu | debian | armbian)
-                    service_unit_url="https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.1/x-ui.service.debian"
+                    service_unit_url="https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/x-ui.service.debian"
                     ;;
                 arch | manjaro | parch)
-                    service_unit_url="https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.1/x-ui.service.arch"
+                    service_unit_url="https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/x-ui.service.arch"
                     ;;
                 *)
-                    service_unit_url="https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.1/x-ui.service.rhel"
+                    service_unit_url="https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/x-ui.service.rhel"
                     ;;
             esac
 

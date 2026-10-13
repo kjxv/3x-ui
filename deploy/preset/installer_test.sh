@@ -15,10 +15,10 @@ cat > /usr/local/bin/curl <<"CURL"
 args=("$@")
 for index in "${!args[@]}"; do
     case "${args[$index]}" in
-        https://github.com/kjxv/3x-ui/releases/download/v3.6.0-preset.1/*)
+        https://github.com/kjxv/3x-ui/releases/download/v3.6.0-preset.2/*)
             args[$index]="file:///assets/${args[$index]##*/}" ;;
-        https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.1/*)
-            args[$index]="file:///source/${args[$index]#https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.1/}" ;;
+        https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/*)
+            args[$index]="file:///source/${args[$index]#https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/}" ;;
     esac
 done
 exec /usr/bin/curl "${args[@]}"
@@ -36,7 +36,7 @@ assert c.execute("SELECT count(*) FROM settings WHERE key=?", ("kjxvTutorialPres
 PY
 bash /source/install.sh > /tmp/install.log 2>&1 || { tail -n 60 /tmp/install.log; exit 1; }
 test ! -e /etc/x-ui/.kjxv-preset-pending
-test "$(/usr/local/x-ui/x-ui -v)" = "3.6.0-preset.1"
+test "$(/usr/local/x-ui/x-ui -v)" = "3.6.0-preset.2"
 test "$(stat -c %a /etc/x-ui/install-result.env)" = 600
 test "$(stat -c %a /etc/x-ui/preset-result.json)" = 600
 . /etc/x-ui/install-result.env

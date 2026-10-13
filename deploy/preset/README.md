@@ -1,6 +1,6 @@
 # 3X-UI 3.6.0 默认节点预设版
 
-固定标签：`v3.6.0-preset.1`。基础源码为本仓库原有的 `v3.6.0` 标签。
+固定标签：`v3.6.0-preset.2`。基础源码为本仓库原有的 `v3.6.0` 标签。
 原来的 v3.6.0 Release、安装包及 video-v3.6.0 教程分支保持原样。
 
 ## 一键安装
@@ -8,7 +8,7 @@
 在干净的 Linux VPS 上以 root 运行：
 
 ```bash
-bash <(curl -fLsS https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.1/deploy/preset/install.sh)
+bash <(curl -fLsS https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/deploy/preset/install.sh)
 ```
 
 安装程序及辅助脚本固定到同一个标签，安装包全部从 kjxv/3x-ui 下载，下载后检查 SHA256。
@@ -59,4 +59,10 @@ Windows 首次运行前可执行 `x-ui.exe preset`，然后启动面板；重复
 构建时重用这些包内的 Xray、规则和辅助二进制，仅替换面板程序及管理脚本。
 预设工作流先检查初始化、回滚、订阅及固定更新行为，并在 Linux 上检查实际 Xray 配置和订阅。
 全部检查通过后，才发布新的 8 个安装包和 `checksums.txt`；不替换旧标签，也不改变旧 Release 的 Latest 标记。
-将来修复发布为 `v3.6.0-preset.2`，不移动或覆盖 `.1`。采用上游新版时，复用初始化模块并重新验证。
+将来修复发布为新的递增标签，不移动或覆盖已发布的 `.1`、`.2`。采用上游新版时，复用初始化模块并重新验证。
+
+## 本次修复
+
+`.2` 修复首次申请 HTTPS 证书后预设初始化在 `/root/bin` 查找规则文件、安装提前退出的问题。
+安装程序现在会恢复到 `/usr/local/x-ui` 再初始化节点和安装服务。
+已部署 `.1` 的用户可直接运行本版本安装命令，账号、证书及已保存节点保留；未完成的预设初始化会继续执行。

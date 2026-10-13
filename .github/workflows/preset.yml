@@ -278,6 +278,8 @@ jobs:
     - name: Verify full installation, failed-first-install recovery and preserved
         edits
       run: bash deploy/preset/installer_test.sh packages
+    - name: Reproduce ACME directory regression and verify fresh HTTPS panel and subscription
+      run: bash deploy/preset/tls_installer_test.sh packages
     if: always() && !cancelled() && (needs.build.result == 'success' || (github.event_name
       == 'workflow_dispatch' && inputs.artifact-run != ''))
   published-install:
