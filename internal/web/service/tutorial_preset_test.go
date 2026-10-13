@@ -37,7 +37,7 @@ func TestTutorialPresetCreatesTwoUsableSubscriptionNodes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(clients) != 1 || clients[0].SubID != result.SubscriptionID {
+		if len(clients) != 1 || clients[0].Email != "01" || clients[0].SubID != result.SubscriptionID {
 			t.Fatal("nodes do not share a subscription")
 		}
 		clientIDs[clients[0].ID] = true
@@ -45,7 +45,12 @@ func TestTutorialPresetCreatesTwoUsableSubscriptionNodes(t *testing.T) {
 		if err := json.Unmarshal([]byte(inbound.StreamSettings), &stream); err != nil {
 			t.Fatal(err)
 		}
-		privateKeys[stream["realitySettings"].(map[string]any)["privateKey"].(string)] = true
+		reality := stream["realitySettings"].(map[string]any)
+		privateKeys[reality["privateKey"].(string)] = true
+		names := reality["serverNames"].([]any)
+		if reality["target"] != TutorialDefaultServerName+":443" || len(names) != 1 || names[0] != TutorialDefaultServerName || reality["minClientVer"] != "1.0.0" {
+			t.Fatal("unexpected default REALITY target, SNI or minimum client version")
+		}
 		// Validate the exact wire shape against the embedded pinned Xray builder.
 		encoded, _ := json.Marshal(inbound.GenXrayInboundConfig())
 		var wire conf.InboundDetourConfig
@@ -56,8 +61,17 @@ func TestTutorialPresetCreatesTwoUsableSubscriptionNodes(t *testing.T) {
 			t.Fatalf("core rejects preset inbound: %v", err)
 		}
 	}
-	if len(privateKeys) != 2 || len(clientIDs) != 2 {
-		t.Fatal("credentials were reused across the two nodes")
+	if len(privateKeys) != 2 || len(clientIDs) != 1 {
+		t.Fatal("nodes must share one client identity and retain independent REALITY keys")
+	}
+	listed, err := (&ClientService{}).List()
+	if err != nil || len(listed) != 1 || listed[0].Email != "01" || len(listed[0].InboundIds) != 2 {
+		t.Fatalf("client list must show one client attached to both nodes: %+v, %v", listed, err)
+	}
+	for _, inbound := range inbounds {
+		if listed[0].InboundIds[0] != inbound.Id && listed[0].InboundIds[1] != inbound.Id {
+			t.Fatal("default client attachment is missing")
+		}
 	}
 	for _, settingKey := range []string{"subEnable", "subClashEnable"} {
 		value, err := (&SettingService{}).getString(settingKey)
@@ -190,6 +204,30 @@ func TestTutorialPresetPortConflictAndInvalidOptions(t *testing.T) {
 	for _, opts := range []TutorialPresetOptions{{DirectPort: 1000, ResidentialPort: 1000}, {DirectPort: -1}, {PublicAddress: "https://example.com"}} {
 		if err := validateTutorialPresetOptions(opts); err == nil {
 			t.Fatal("invalid preset options were accepted")
+		}
+	}
+}
+
+func TestTutorialPresetRejectsMicrosoftServerNames(t *testing.T) {
+	for _, host := range []string{"microsoft.com", "www.microsoft.com", "WWW.MICROSOFT.COM.", "login.microsoftonline.com", "www.bing.com", "a.azureedge.net", "office.com"} {
+		if err := validateTutorialPresetOptions(TutorialPresetOptions{RealityServerName: host}); err == nil {
+			t.Fatalf("Microsoft server name accepted: %s", host)
+		}
+	}
+	for _, host := range []string{"", "www.samsung.com", "www.apple.com", "microsoft.com.example.org", "notmicrosoft.com"} {
+		if err := validateTutorialPresetOptions(TutorialPresetOptions{RealityServerName: host}); err != nil {
+			t.Fatalf("unrelated server name rejected: %s: %v", host, err)
+		}
+	}
+	setupConflictDB(t)
+	if _, err := ApplyTutorialPreset(TutorialPresetOptions{RealityServerName: "www.microsoft.com"}); err == nil {
+		t.Fatal("initialization accepted Microsoft SNI")
+	}
+	for _, table := range []any{&model.Inbound{}, &model.ClientRecord{}, &model.ClientInbound{}} {
+		var count int64
+		database.GetDB().Model(table).Count(&count)
+		if count != 0 {
+			t.Fatal("rejected SNI left partial nodes or clients")
 		}
 	}
 }

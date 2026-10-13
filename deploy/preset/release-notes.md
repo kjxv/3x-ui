@@ -1,3 +1,8 @@
+默认 REALITY 目标和 SNI 改为 `www.samsung.com`；预设参数拒绝微软及常见微软服务域名。
+两个入站的最小客户端版本默认填写 `1.0.0`。
+只创建一个邮箱为 `01` 的客户端，并关联 VLESS 直连、VLESS 住宅两个入站；两者共用随机 UUID 和订阅 ID。
+升级已配置的面板保留用户配置，不自动合并或删除已有客户端。
+
 修复首次申请 HTTPS 证书后目录切换导致 `geoip.dat` 路径错误、预设初始化中断和面板未启动的问题。
 新增包含 ACME 安装目录切换、TLS 面板和 TLS Clash 订阅的回归测试。
 
@@ -10,7 +15,7 @@
 
 部署命令：
 ```bash
-bash <(curl -fLsS https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/deploy/preset/install.sh)
+bash <(curl -fLsS https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/deploy/preset/install.sh)
 ```
 
 安装包下载后由安装程序检查 checksums.txt；请允许实际入站端口以及面板和订阅端口通过云安全组。

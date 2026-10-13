@@ -129,7 +129,7 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/install.sh)
+    bash <(curl -Ls https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/install.sh)
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -140,12 +140,12 @@ install() {
 }
 
 update() {
-    LOGE "这是固定版本 v3.6.0-preset.2。请使用对应教程的预设版安装命令更新；原有节点和住宅信息会保留。"
+    LOGE "这是固定版本 v3.6.0-preset.3。请使用对应教程的预设版安装命令更新；原有节点和住宅信息会保留。"
     return 1
 }
 
 update_dev() {
-    LOGE "这是固定版本 v3.6.0-preset.2。请使用对应教程的预设版安装命令更新；原有节点和住宅信息会保留。"
+    LOGE "这是固定版本 v3.6.0-preset.3。请使用对应教程的预设版安装命令更新；原有节点和住宅信息会保留。"
     return 1
 }
 
@@ -195,7 +195,7 @@ update_menu() {
         return 0
     fi
 
-    if replace_xui_script "https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/x-ui.sh" "false"; then
+    if replace_xui_script "https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/x-ui.sh" "false"; then
         chmod +x ${xui_folder}/x-ui.sh
         echo -e "${green}Update successful. The panel has automatically restarted.${plain}"
         exit 0
@@ -279,7 +279,7 @@ uninstall() {
     echo ""
     echo -e "Uninstalled Successfully.\n"
     echo "If you need to install this panel again, you can use below command:"
-    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/install.sh)${plain}"
+    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/install.sh)${plain}"
     echo ""
     # Trap the SIGTERM signal
     trap delete_script SIGTERM
@@ -812,7 +812,7 @@ enable_bbr() {
 }
 
 update_shell() {
-    if replace_xui_script "https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/x-ui.sh" "true"; then
+    if replace_xui_script "https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/x-ui.sh" "true"; then
         LOGI "Upgrade script succeeded, Please rerun the script"
         before_show_menu
     else

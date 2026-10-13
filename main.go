@@ -600,7 +600,7 @@ func main() {
 		presetCmd.StringVar(&opts.PublicAddress, "publicAddress", "", "Public IP or hostname (default: panel host)")
 		presetCmd.IntVar(&opts.DirectPort, "directPort", 0, "Direct node port (0: choose available port)")
 		presetCmd.IntVar(&opts.ResidentialPort, "residentialPort", 0, "Residential node port (0: choose available port)")
-		presetCmd.StringVar(&opts.RealityServerName, "realityServerName", "www.microsoft.com", "REALITY target hostname")
+		presetCmd.StringVar(&opts.RealityServerName, "realityServerName", service.TutorialDefaultServerName, "Non-Microsoft REALITY target hostname")
 		if err := presetCmd.Parse(os.Args[2:]); err != nil {
 			os.Exit(1)
 		}

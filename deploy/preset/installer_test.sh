@@ -15,10 +15,10 @@ cat > /usr/local/bin/curl <<"CURL"
 args=("$@")
 for index in "${!args[@]}"; do
     case "${args[$index]}" in
-        https://github.com/kjxv/3x-ui/releases/download/v3.6.0-preset.2/*)
+        https://github.com/kjxv/3x-ui/releases/download/v3.6.0-preset.3/*)
             args[$index]="file:///assets/${args[$index]##*/}" ;;
-        https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/*)
-            args[$index]="file:///source/${args[$index]#https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.2/}" ;;
+        https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/*)
+            args[$index]="file:///source/${args[$index]#https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/}" ;;
     esac
 done
 exec /usr/bin/curl "${args[@]}"
@@ -36,7 +36,7 @@ assert c.execute("SELECT count(*) FROM settings WHERE key=?", ("kjxvTutorialPres
 PY
 bash /source/install.sh > /tmp/install.log 2>&1 || { tail -n 60 /tmp/install.log; exit 1; }
 test ! -e /etc/x-ui/.kjxv-preset-pending
-test "$(/usr/local/x-ui/x-ui -v)" = "3.6.0-preset.2"
+test "$(/usr/local/x-ui/x-ui -v)" = "3.6.0-preset.3"
 test "$(stat -c %a /etc/x-ui/install-result.env)" = 600
 test "$(stat -c %a /etc/x-ui/preset-result.json)" = 600
 . /etc/x-ui/install-result.env
@@ -48,6 +48,14 @@ import json,sqlite3
 result=json.load(open("/etc/x-ui/preset-result.json"))
 c=sqlite3.connect("/etc/x-ui/x-ui.db")
 assert c.execute("SELECT count(*) FROM inbounds WHERE enable=1").fetchone()[0] == 2
+records=c.execute("SELECT id,email,uuid FROM clients").fetchall()
+assert len(records) == 1 and records[0][1] == "01"
+assert c.execute("SELECT count(*) FROM client_inbounds WHERE client_id=?",(records[0][0],)).fetchone()[0] == 2
+for row in c.execute("SELECT settings,stream_settings FROM inbounds"):
+    client=json.loads(row[0])["clients"][0]
+    reality=json.loads(row[1])["realitySettings"]
+    assert client["email"] == "01" and client["id"] == records[0][2]
+    assert reality["minClientVer"] == "1.0.0" and reality["serverNames"] == ["www.samsung.com"]
 sub_ids=[json.loads(row[0])["clients"][0]["subId"] for row in c.execute("SELECT settings FROM inbounds")]
 assert sub_ids == [result["subscriptionId"],result["subscriptionId"]]
 assert c.execute("SELECT value FROM settings WHERE key=?",("subClashEnable",)).fetchone()[0] == "true"

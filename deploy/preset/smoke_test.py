@@ -141,6 +141,16 @@ def main():
         result = json.loads(database.execute("SELECT value FROM settings WHERE key='kjxvTutorialPresetV1'").fetchone()[0])
         inbounds = database.execute('SELECT tag, settings, stream_settings FROM inbounds ORDER BY sub_sort_index').fetchall()
         assert len(inbounds) == 2
+        records = database.execute('SELECT id,email,uuid,sub_id FROM clients').fetchall()
+        assert len(records) == 1 and records[0][1] == '01'
+        attachments = database.execute('SELECT inbound_id FROM client_inbounds WHERE client_id=?', (records[0][0],)).fetchall()
+        assert len(attachments) == 2
+        for _, settings_json, stream_json in inbounds:
+            client = json.loads(settings_json)['clients'][0]
+            assert client['email'] == '01' and client['id'] == records[0][2] and client['subId'] == result['subscriptionId']
+            reality = json.loads(stream_json)['realitySettings']
+            assert reality['minClientVer'] == '1.0.0'
+            assert reality['serverNames'] == ['www.samsung.com']
         core = str(root / ('bin/xray-windows-amd64.exe' if os.name == 'nt' else 'bin/xray-linux-amd64'))
         subprocess.run([core, 'version'], env=env, check=True, stdout=subprocess.DEVNULL)
         http_fixture = start_server(http.server.ThreadingHTTPServer(('127.0.0.1', 0), HTTP))
@@ -149,8 +159,8 @@ def main():
         servers.append(socks)
         # A local TLS 1.3 / h2 target makes REALITY handshake tests deterministic.
         subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', str(work / 'key.pem'),
-                        '-out', str(work / 'cert.pem'), '-days', '1', '-subj', '/CN=www.microsoft.com',
-                        '-addext', 'subjectAltName=DNS:www.microsoft.com'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        '-out', str(work / 'cert.pem'), '-days', '1', '-subj', '/CN=www.samsung.com',
+                        '-addext', 'subjectAltName=DNS:www.samsung.com'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         target = http.server.ThreadingHTTPServer(('127.0.0.1', 0), HTTP)
         tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         tls.minimum_version = ssl.TLSVersion.TLSv1_3
@@ -212,7 +222,7 @@ def main():
                     'inbounds': [{'listen':'127.0.0.1', 'port':local_port, 'protocol':'socks', 'settings':{'udp':False}}],
                     'outbounds': [{'protocol':'vless', 'settings':{'address':'127.0.0.1', 'port':direct_port if index == 0 else residential_port,
                         'id':client['id'], 'flow':client['flow'], 'encryption':'none'},
-                        'streamSettings': {'network':'tcp', 'security':'reality', 'realitySettings':{'serverName':'www.microsoft.com',
+                        'streamSettings': {'network':'tcp', 'security':'reality', 'realitySettings':{'serverName':'www.samsung.com',
                             'publicKey':reality['settings']['publicKey'], 'shortId':reality['shortIds'][0], 'fingerprint':'chrome'}}}]}
                 path = work / f'client-{index}.json'
                 path.write_text(json.dumps(client_config))

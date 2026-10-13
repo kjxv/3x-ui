@@ -103,6 +103,14 @@ python3 - <<'PY'
 import json,sqlite3,ssl,urllib.request
 c=sqlite3.connect('/etc/x-ui/x-ui.db')
 assert c.execute('SELECT count(*) FROM inbounds WHERE enable=1').fetchone()[0] == 2
+records=c.execute('SELECT id,email,uuid FROM clients').fetchall()
+assert len(records) == 1 and records[0][1] == '01'
+assert c.execute('SELECT count(*) FROM client_inbounds WHERE client_id=?',(records[0][0],)).fetchone()[0] == 2
+for settings_json,stream_json in c.execute('SELECT settings,stream_settings FROM inbounds'):
+    client=json.loads(settings_json)['clients'][0]
+    reality=json.loads(stream_json)['realitySettings']
+    assert client['id'] == records[0][2] and client['email'] == '01'
+    assert reality['minClientVer'] == '1.0.0' and reality['serverNames'] == ['www.samsung.com']
 settings=dict(c.execute('SELECT key,value FROM settings'))
 assert settings['subEnable'] == settings['subClashEnable'] == 'true'
 assert settings['subCertFile'] == settings['webCertFile']

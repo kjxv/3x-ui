@@ -21,10 +21,11 @@ import (
 )
 
 const (
-	TutorialPresetMarker   = "kjxvTutorialPresetV1"
-	TutorialDirectTag      = "kjxv-direct-in"
-	TutorialResidentialTag = "kjxv-residential-in"
-	TutorialSocksTag       = "kjxv-residential-socks"
+	TutorialPresetMarker      = "kjxvTutorialPresetV1"
+	TutorialDirectTag         = "kjxv-direct-in"
+	TutorialResidentialTag    = "kjxv-residential-in"
+	TutorialSocksTag          = "kjxv-residential-socks"
+	TutorialDefaultServerName = "www.samsung.com"
 )
 
 type TutorialPresetOptions struct {
@@ -105,7 +106,7 @@ func ApplyTutorialPreset(opts TutorialPresetOptions) (*TutorialPresetResult, err
 		}
 		serverName := opts.RealityServerName
 		if serverName == "" {
-			serverName = "www.microsoft.com"
+			serverName = TutorialDefaultServerName
 		}
 		var xrayTemplate map[string]any
 		if err := json.Unmarshal([]byte(template), &xrayTemplate); err != nil {
@@ -151,6 +152,9 @@ func ApplyTutorialPreset(opts TutorialPresetOptions) (*TutorialPresetResult, err
 			return err
 		}
 		now := time.Now().UnixMilli()
+		// One portable client identity is attached to both tutorial inbounds.
+		client := model.Client{ID: uuid.NewString(), Email: "01", Flow: "xtls-rprx-vision",
+			SubID: subID, Enable: true, CreatedAt: now, UpdatedAt: now}
 		var owner model.User
 		if err := tx.Order("id").First(&owner).Error; err != nil {
 			return err
@@ -162,8 +166,6 @@ func ApplyTutorialPreset(opts TutorialPresetOptions) (*TutorialPresetResult, err
 			{TutorialDirectTag, "VLESS 直连", directPort},
 			{TutorialResidentialTag, "VLESS 住宅", residentialPort},
 		} {
-			client := model.Client{ID: uuid.NewString(), Email: definition.tag + "-" + subID[:8],
-				Flow: "xtls-rprx-vision", SubID: subID, Enable: true, CreatedAt: now, UpdatedAt: now}
 			settings, err := json.Marshal(map[string]any{"clients": []model.Client{client}, "decryption": "none", "fallbacks": []any{}})
 			if err != nil {
 				return err
@@ -236,7 +238,29 @@ func validateTutorialPresetOptions(opts TutorialPresetOptions) error {
 			}
 		}
 	}
+	if tutorialMicrosoftServerName(opts.RealityServerName) {
+		return errors.New("Microsoft domains are not supported by this tutorial preset; use a compatible non-Microsoft REALITY hostname")
+	}
 	return nil
+}
+
+// Compare DNS label boundaries so a related service or subdomain is blocked,
+// while an unrelated hostname merely containing the word remains selectable.
+func tutorialMicrosoftServerName(serverName string) bool {
+	host := strings.TrimSuffix(strings.ToLower(serverName), ".")
+	for _, domain := range []string{
+		"microsoft.com", "microsoft.net", "microsoft.cn", "microsoftonline.com",
+		"microsoftonline-p.com", "windows.com", "windows.net", "windowsupdate.com",
+		"live.com", "outlook.com", "office.com", "office365.com", "sharepoint.com",
+		"azure.com", "azure.net", "azureedge.net", "azurefd.net", "msedge.net",
+		"bing.com", "msn.com", "xbox.com", "skype.com", "onedrive.com", "aka.ms",
+		"msftconnecttest.com", "msftncsi.com", "visualstudio.com",
+	} {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
 }
 
 func tutorialPresetPort(requested int, preferred []int, used map[int]bool) (int, error) {
@@ -284,7 +308,7 @@ func tutorialRealityStream(serverName string) (string, error) {
 	}
 	stream, err := json.Marshal(map[string]any{
 		"network": "tcp", "security": "reality", "tcpSettings": map[string]any{"header": map[string]any{"type": "none"}},
-		"realitySettings": map[string]any{"show": false, "target": net.JoinHostPort(serverName, "443"), "xver": 0,
+		"realitySettings": map[string]any{"show": false, "target": net.JoinHostPort(serverName, "443"), "xver": 0, "minClientVer": "1.0.0",
 			"serverNames": []string{serverName}, "privateKey": base64.RawURLEncoding.EncodeToString(key.Bytes()), "shortIds": []string{shortID},
 			"settings": map[string]any{"publicKey": base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), "fingerprint": "chrome", "serverName": serverName, "spiderX": "/"}},
 	})
