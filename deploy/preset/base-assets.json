@@ -1,0 +1,48 @@
+{
+  "repository": "kjxv/3x-ui",
+  "tag": "v3.6.0",
+  "sourceCommit": "ece16559397f756513d7338f59168049dd6e2e51",
+  "releaseId": 366499830,
+  "assets": [
+    {
+      "name": "x-ui-linux-386.tar.gz",
+      "sha256": "eaadb3b0c37a46419a8a664a27d44742c62e889097cfd0f33e49f698bfb83ba9",
+      "size": 77253468
+    },
+    {
+      "name": "x-ui-linux-amd64.tar.gz",
+      "sha256": "ea5c397227995894a3fc8c67fdc175c7c680f03546836b8893a22a317d37ba71",
+      "size": 79453268
+    },
+    {
+      "name": "x-ui-linux-arm64.tar.gz",
+      "sha256": "a359c05019f7d835b8e5d79c46f2d646d906459101f255633ea9788145f4c575",
+      "size": 75287170
+    },
+    {
+      "name": "x-ui-linux-armv5.tar.gz",
+      "sha256": "35ee9ae5465471be5928d9ea32c98b83e25ec40b46687f87cc06bb6d65760fee",
+      "size": 72093400
+    },
+    {
+      "name": "x-ui-linux-armv6.tar.gz",
+      "sha256": "f7fe02fb129f5531009009d2fe79851c869746848a76d2bad56d5735a894fb0c",
+      "size": 77064885
+    },
+    {
+      "name": "x-ui-linux-armv7.tar.gz",
+      "sha256": "5620dcb3360d34782fbd790fbe860b044820ae04de5bfb3b6a01c56e72680f50",
+      "size": 77015040
+    },
+    {
+      "name": "x-ui-linux-s390x.tar.gz",
+      "sha256": "6663d03a1f6d58bae139c6659cd9d914e365754d37bfbf3432f48f12a9d6e425",
+      "size": 73643898
+    },
+    {
+      "name": "x-ui-windows-amd64.zip",
+      "sha256": "2c53d4419b30bf60ccccc393823a490f8bc8c9405f11cbc9ef1bf20b0c77adb6",
+      "size": 87278057
+    }
+  ]
+}

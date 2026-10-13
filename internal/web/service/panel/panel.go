@@ -129,6 +129,10 @@ func (s *PanelService) RestartPanel(delay time.Duration) error {
 // is enabled on a dev build it compares commits against the rolling dev release;
 // otherwise it compares versions against the latest stable tag.
 func (s *PanelService) GetUpdateInfo() (*PanelUpdateInfo, error) {
+	if config.IsTutorialPreset() {
+		current := config.GetBaseVersion()
+		return &PanelUpdateInfo{Channel: "stable", CurrentVersion: current, LatestVersion: current, UpdateAvailable: false}, nil
+	}
 	if devChannelActive() {
 		return getDevUpdateInfo()
 	}
@@ -213,6 +217,9 @@ func (s *PanelService) GetUpdateStatus() *PanelUpdateStatus {
 }
 
 func (s *PanelService) startUpdate(useDev bool) (int64, error) {
+	if config.IsTutorialPreset() {
+		return 0, fmt.Errorf("这是固定版本的节点预设版，请使用 kjxv/3x-ui 对应教程版本的安装命令升级")
+	}
 	runID := time.Now().UnixNano()
 	if !acquireUpdateSlot(runID) {
 		return 0, fmt.Errorf("a panel update is already in progress")

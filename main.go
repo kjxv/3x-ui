@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -576,6 +577,7 @@ func main() {
 		fmt.Println("    migrate        migrate from other/old x-ui")
 		fmt.Println("    migrate-db     SQLite <-> .dump (--dump/--restore) or copy into PostgreSQL (--dsn)")
 		fmt.Println("    setting        set settings")
+		fmt.Println("    preset         initialize tutorial nodes once")
 	}
 
 	flag.Parse()
@@ -592,6 +594,33 @@ func main() {
 			return
 		}
 		runWebServer()
+	case "preset":
+		presetCmd := flag.NewFlagSet("preset", flag.ExitOnError)
+		opts := service.TutorialPresetOptions{}
+		presetCmd.StringVar(&opts.PublicAddress, "publicAddress", "", "Public IP or hostname (default: panel host)")
+		presetCmd.IntVar(&opts.DirectPort, "directPort", 0, "Direct node port (0: choose available port)")
+		presetCmd.IntVar(&opts.ResidentialPort, "residentialPort", 0, "Residential node port (0: choose available port)")
+		presetCmd.StringVar(&opts.RealityServerName, "realityServerName", "www.microsoft.com", "REALITY target hostname")
+		if err := presetCmd.Parse(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
+		if err := database.InitDB(config.GetDBPath()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		result, err := service.ApplyTutorialPreset(opts)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			_ = database.CloseDB()
+			os.Exit(1)
+		}
+		encoded, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(string(encoded))
+		_ = database.CloseDB()
 	case "migrate":
 		migrateDb()
 	case "migrate-db":

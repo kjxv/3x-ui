@@ -266,3 +266,9 @@ func init() {
 	}
 	_ = copyFile(oldDBPath, newDBPath) // ignore error
 }
+
+// IsTutorialPreset identifies the fixed tutorial distribution. Its upstream
+// update entry points stay disabled so the installed release remains pinned.
+func IsTutorialPreset() bool {
+	return strings.Contains(GetBaseVersion(), "-preset.")
+}
