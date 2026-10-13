@@ -224,7 +224,7 @@ jobs:
         cd ..
 
         gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "3X-UI $GITHUB_REF_NAME
-        Ĭ�Ͻڵ�Ԥ���" --notes-file deploy/preset/release-notes.md
+        默认节点预设版" --notes-file deploy/preset/release-notes.md
 
         gh release upload "$GITHUB_REF_NAME" packages/* install.sh x-ui.sh deploy/preset/README.md
 
