@@ -9,9 +9,11 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "!v*-preset.*"
 
 jobs:
   build:
+    if: ${{ !contains(github.ref_name, '-preset.') && !startsWith(github.ref_name, 'codex/v3.6.0-preset') }}
     runs-on: ubuntu-latest
 
     steps:
