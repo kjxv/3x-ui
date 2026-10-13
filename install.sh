@@ -1413,7 +1413,10 @@ _install_xui_service_unit() {
 
 install_x-ui() {
     local preset_first_install=0
-    if [[ ! -e "${xui_folder}/x-ui" && ! -e "${XUI_DB_FOLDER:-/etc/x-ui}/x-ui.db" ]]; then
+    local preset_pending="${XUI_DB_FOLDER:-/etc/x-ui}/.kjxv-preset-pending"
+    # Only this installer creates a pending marker. Retrying a failed fresh
+    # installation must resume initialization; a pre-existing DB stays untouched.
+    if [[ -f "$preset_pending" ]] || [[ ! -e "${xui_folder}/x-ui" && ! -e "${XUI_DB_FOLDER:-/etc/x-ui}/x-ui.db" ]]; then
         preset_first_install=1
     fi
     if [[ $# -gt 0 && "$1" != "v3.6.0-preset.1" ]]; then
@@ -1559,6 +1562,10 @@ install_x-ui() {
     fi
     chmod +x /usr/bin/x-ui
     mkdir -p /var/log/x-ui
+    if [[ "$preset_first_install" == "1" ]]; then
+        mkdir -p "${XUI_DB_FOLDER:-/etc/x-ui}" || exit 1
+        (umask 077; printf '%s\n' "v3.6.0-preset.1" > "$preset_pending") || exit 1
+    fi
     config_after_install
     if [[ "$preset_first_install" == "1" ]]; then
         # SSL setup can have started the service. Stop it before reserving ports
@@ -1580,6 +1587,7 @@ install_x-ui() {
         fi
         mv -f "$preset_result_temp" "$preset_result"
         chmod 600 "$preset_result"
+        rm -f "$preset_pending"
         echo "VLESS 直连、VLESS 住宅、住宅 Socks5 出站和 Clash 订阅已初始化。"
         echo "登录后台后，在 Xray 设置 → 出站中修改 kjxv-residential-socks 的地址、端口及认证信息。"
         cat "$preset_result"
