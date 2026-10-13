@@ -93,7 +93,11 @@ import json,sqlite3
 c=sqlite3.connect("/etc/x-ui/x-ui.db")
 snapshot={"nodes":c.execute("SELECT tag,settings,stream_settings FROM inbounds ORDER BY tag").fetchall(),
           "settings":c.execute("SELECT key,value FROM settings WHERE key IN (?,?,?) ORDER BY key",("xrayTemplateConfig","subClashEnable","kjxvTutorialPresetV1")).fetchall()}
-assert json.loads(json.dumps(snapshot)) == json.load(open("/tmp/before.json"))
+before=json.load(open("/tmp/before.json"))
+def canonical(snapshot):
+    return {"nodes":[[tag,json.loads(settings),json.loads(stream)] for tag,settings,stream in snapshot["nodes"]],
+            "settings":[[key,json.loads(value)] for key,value in snapshot["settings"]]}
+assert canonical(snapshot) == canonical(before), "Reinstall changed configuration: " + repr({"before":canonical(before),"after":canonical(snapshot)})
 PY
 echo "PASS: full installer, failed-first-install retry, random admin credentials, two-node Clash subscription, repeat install preserves residential credentials and subscription settings."
 '
