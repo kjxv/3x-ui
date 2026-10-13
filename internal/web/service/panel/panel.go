@@ -218,7 +218,7 @@ func (s *PanelService) GetUpdateStatus() *PanelUpdateStatus {
 
 func (s *PanelService) startUpdate(useDev bool) (int64, error) {
 	if config.IsTutorialPreset() {
-		return 0, fmt.Errorf("这是固定版本的节点预设版，请使用 kjxv/3x-ui 对应教程版本的安装命令升级")
+		return 0, fmt.Errorf("这是固定版本的节点预设版，请使用本仓库对应教程版本的安装命令升级")
 	}
 	runID := time.Now().UnixNano()
 	if !acquireUpdateSlot(runID) {

@@ -138,9 +138,10 @@ def main():
         command = [binary, 'preset', '-publicAddress', '127.0.0.1', '-directPort', str(direct_port), '-residentialPort', str(residential_port)]
         subprocess.run(command, cwd=root, env=env, check=True, stdout=subprocess.DEVNULL)
         database = sqlite3.connect(work / 'x-ui.db')
-        result = json.loads(database.execute("SELECT value FROM settings WHERE key='kjxvTutorialPresetV1'").fetchone()[0])
+        result = json.loads(database.execute("SELECT value FROM settings WHERE key='tutorialPresetV1'").fetchone()[0])
         inbounds = database.execute('SELECT tag, settings, stream_settings FROM inbounds ORDER BY sub_sort_index').fetchall()
-        assert len(inbounds) == 2
+        assert [row[0] for row in inbounds] == ['默认直连', '默认住宅']
+        assert 'kjxv' not in json.dumps(inbounds).lower()
         records = database.execute('SELECT id,email,uuid,sub_id FROM clients').fetchall()
         assert len(records) == 1 and records[0][1] == '01'
         attachments = database.execute('SELECT inbound_id FROM client_inbounds WHERE client_id=?', (records[0][0],)).fetchall()
@@ -173,11 +174,15 @@ def main():
             stream['realitySettings']['target'] = f'127.0.0.1:{target.server_address[1]}'
             database.execute('UPDATE inbounds SET stream_settings=? WHERE tag=?', (json.dumps(stream), tag))
         config = json.loads(database.execute("SELECT value FROM settings WHERE key='xrayTemplateConfig'").fetchone()[0])
+        assert 'kjxv' not in json.dumps(config).lower()
+        assert any(ob['tag'] == '默认' and ob['protocol'] == 'socks' for ob in config['outbounds'])
+        assert config['routing']['rules'][-1]['inboundTag'] == ['默认住宅']
+        assert config['routing']['rules'][-1]['outboundTag'] == '默认'
         config['routing']['rules'] = [rule for rule in config['routing']['rules'] if rule.get('ip') != ['geoip:private']]
         for outbound in config['outbounds']:
             if outbound['tag'] == 'direct':
                 outbound['settings']['finalRules'] = [{'action': 'allow'}]
-            if outbound['tag'] == 'kjxv-residential-socks':
+            if outbound['tag'] == '默认':
                 outbound['settings'] = {'address': '127.0.0.1', 'port': socks.server_address[1], 'user': 'fixture-user', 'pass': 'fixture-password'}
         values = {'xrayTemplateConfig': json.dumps(config), 'webPort': str(panel_port), 'webListen': '127.0.0.1',
                   'webBasePath': '/', 'subPort': str(subscription_port), 'subListen': '127.0.0.1'}
@@ -205,6 +210,7 @@ def main():
                 subscription = response.read().decode()
                 assert subscription.count('type: vless') == 2
                 assert 'VLESS 直连' in subscription and 'VLESS 住宅' in subscription
+                assert 'kjxv' not in subscription.lower()
                 assert 'reality-opts:' in subscription and 'MATCH,PROXY' in subscription
             before = database.execute('SELECT tag, settings, stream_settings FROM inbounds ORDER BY tag').fetchall()
             saved_template = database.execute("SELECT value FROM settings WHERE key='xrayTemplateConfig'").fetchone()[0]

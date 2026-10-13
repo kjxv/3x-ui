@@ -70,19 +70,19 @@ PY
     fi
     grep -Fq '/root/bin/geoip.dat: no such file or directory' /tmp/tls-install.log
     test "$(cat /tmp/acme-install-working-directory)" = /root
-    test -f /etc/x-ui/.kjxv-preset-pending
+    test -f /etc/x-ui/.preset-pending
     python3 - <<'PY'
 import sqlite3
 c=sqlite3.connect('/etc/x-ui/x-ui.db')
 assert c.execute('SELECT count(*) FROM inbounds').fetchone()[0] == 0
-assert c.execute('SELECT count(*) FROM settings WHERE key=?',('kjxvTutorialPresetV1',)).fetchone()[0] == 0
+assert c.execute('SELECT count(*) FROM settings WHERE key=?',('tutorialPresetV1',)).fetchone()[0] == 0
 PY
     echo 'PASS: reproduced the original geoip path failure after ACME changed to /root; initialization rolled back'
     exit 0
 fi
 bash "$installer" > /tmp/tls-install.log 2>&1 || { tail -n 30 /tmp/tls-install.log; exit 1; }
 test "$(cat /tmp/acme-install-working-directory)" = /root
-test ! -e /etc/x-ui/.kjxv-preset-pending
+test ! -e /etc/x-ui/.preset-pending
 test -f /etc/systemd/system/x-ui.service
 test "$(/usr/local/x-ui/x-ui -v)" = "$(cat /source/internal/config/version)"
 . /etc/x-ui/install-result.env

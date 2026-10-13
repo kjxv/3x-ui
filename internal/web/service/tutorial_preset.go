@@ -21,11 +21,14 @@ import (
 )
 
 const (
-	TutorialPresetMarker      = "kjxvTutorialPresetV1"
-	TutorialDirectTag         = "kjxv-direct-in"
-	TutorialResidentialTag    = "kjxv-residential-in"
-	TutorialSocksTag          = "kjxv-residential-socks"
+	TutorialPresetMarker      = "tutorialPresetV1"
+	TutorialDirectTag         = "默认直连"
+	TutorialResidentialTag    = "默认住宅"
+	TutorialSocksTag          = "默认"
 	TutorialDefaultServerName = "www.samsung.com"
+
+	// Read the old completion marker so upgrading never reapplies the preset.
+	tutorialLegacyPresetMarker = "kjxvTutorialPresetV1"
 )
 
 type TutorialPresetOptions struct {
@@ -72,6 +75,9 @@ func ApplyTutorialPreset(opts TutorialPresetOptions) (*TutorialPresetResult, err
 	err = database.GetDB().Transaction(func(tx *gorm.DB) error {
 		var marker model.Setting
 		findErr := tx.Where("key = ?", TutorialPresetMarker).First(&marker).Error
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+			findErr = tx.Where("key = ?", tutorialLegacyPresetMarker).First(&marker).Error
+		}
 		if findErr == nil {
 			if err := json.Unmarshal([]byte(marker.Value), result); err != nil {
 				return fmt.Errorf("invalid preset marker: %w", err)

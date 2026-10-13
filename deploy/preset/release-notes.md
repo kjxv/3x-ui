@@ -1,3 +1,13 @@
+首次部署生成的节点相关标签去除个人缩写：
+
+- 直连入站：`默认直连`
+- 住宅入站：`默认住宅`
+- 住宅 Socks5 出站：`默认`
+
+对应路由同步使用这些标签。节点名称保留 VLESS 直连、VLESS 住宅；只创建一个 `01` 客户端，关联两个入站。
+新安装的内部初始化标记采用通用名称，同时兼容旧版本的标记，避免升级或重试时重复创建节点。
+升级已有面板会保留已保存的标签及其他配置；手动改名时需同步修改路由引用。
+
 默认 REALITY 目标和 SNI 改为 `www.samsung.com`；预设参数拒绝微软及常见微软服务域名。
 两个入站的最小客户端版本默认填写 `1.0.0`。
 只创建一个邮箱为 `01` 的客户端，并关联 VLESS 直连、VLESS 住宅两个入站；两者共用随机 UUID 和订阅 ID。
@@ -15,7 +25,7 @@
 
 部署命令：
 ```bash
-bash <(curl -fLsS https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/deploy/preset/install.sh)
+bash <(curl -fLsS https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.4/deploy/preset/install.sh)
 ```
 
 安装包下载后由安装程序检查 checksums.txt；请允许实际入站端口以及面板和订阅端口通过云安全组。

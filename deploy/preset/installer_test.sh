@@ -15,10 +15,10 @@ cat > /usr/local/bin/curl <<"CURL"
 args=("$@")
 for index in "${!args[@]}"; do
     case "${args[$index]}" in
-        https://github.com/kjxv/3x-ui/releases/download/v3.6.0-preset.3/*)
+        https://github.com/kjxv/3x-ui/releases/download/v3.6.0-preset.4/*)
             args[$index]="file:///assets/${args[$index]##*/}" ;;
-        https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/*)
-            args[$index]="file:///source/${args[$index]#https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.3/}" ;;
+        https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.4/*)
+            args[$index]="file:///source/${args[$index]#https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.4/}" ;;
     esac
 done
 exec /usr/bin/curl "${args[@]}"
@@ -27,16 +27,20 @@ chmod +x /usr/local/bin/curl
 if XUI_PRESET_DIRECT_PORT=65536 bash /source/install.sh > /tmp/failed-install.log 2>&1; then
     echo "Invalid preset port unexpectedly succeeded"; exit 1
 fi
-test -f /etc/x-ui/.kjxv-preset-pending
+test -f /etc/x-ui/.preset-pending
+test ! -e /etc/x-ui/.kjxv-preset-pending
+# Resume the legacy pending marker used by previously published installers.
+mv /etc/x-ui/.preset-pending /etc/x-ui/.kjxv-preset-pending
 python3 - <<"PY"
 import sqlite3
 c=sqlite3.connect("/etc/x-ui/x-ui.db")
 assert c.execute("SELECT count(*) FROM inbounds").fetchone()[0] == 0
-assert c.execute("SELECT count(*) FROM settings WHERE key=?", ("kjxvTutorialPresetV1",)).fetchone()[0] == 0
+assert c.execute("SELECT count(*) FROM settings WHERE key=?", ("tutorialPresetV1",)).fetchone()[0] == 0
 PY
 bash /source/install.sh > /tmp/install.log 2>&1 || { tail -n 60 /tmp/install.log; exit 1; }
+test ! -e /etc/x-ui/.preset-pending
 test ! -e /etc/x-ui/.kjxv-preset-pending
-test "$(/usr/local/x-ui/x-ui -v)" = "3.6.0-preset.3"
+test "$(/usr/local/x-ui/x-ui -v)" = "3.6.0-preset.4"
 test "$(stat -c %a /etc/x-ui/install-result.env)" = 600
 test "$(stat -c %a /etc/x-ui/preset-result.json)" = 600
 . /etc/x-ui/install-result.env
@@ -86,13 +90,13 @@ import json,sqlite3
 c=sqlite3.connect("/etc/x-ui/x-ui.db")
 config=json.loads(c.execute("SELECT value FROM settings WHERE key=?",("xrayTemplateConfig",)).fetchone()[0])
 for ob in config["outbounds"]:
-    if ob["tag"] == "kjxv-residential-socks":
+    if ob["tag"] == "默认":
         ob["settings"]={"address":"192.0.2.10","port":1080,"user":"saved-user","pass":"saved-password"}
 c.execute("UPDATE settings SET value=? WHERE key=?",(json.dumps(config),"xrayTemplateConfig"))
 c.execute("UPDATE settings SET value=? WHERE key=?",("false","subClashEnable"))
 c.commit()
 snapshot={"nodes":c.execute("SELECT tag,settings,stream_settings FROM inbounds ORDER BY tag").fetchall(),
-          "settings":c.execute("SELECT key,value FROM settings WHERE key IN (?,?,?) ORDER BY key",("xrayTemplateConfig","subClashEnable","kjxvTutorialPresetV1")).fetchall()}
+          "settings":c.execute("SELECT key,value FROM settings WHERE key IN (?,?,?) ORDER BY key",("xrayTemplateConfig","subClashEnable","tutorialPresetV1")).fetchall()}
 json.dump(snapshot,open("/tmp/before.json","w"))
 PY
 bash /source/install.sh > /tmp/reinstall.log 2>&1 || { tail -n 60 /tmp/reinstall.log; exit 1; }
@@ -100,7 +104,7 @@ python3 - <<"PY"
 import json,sqlite3
 c=sqlite3.connect("/etc/x-ui/x-ui.db")
 snapshot={"nodes":c.execute("SELECT tag,settings,stream_settings FROM inbounds ORDER BY tag").fetchall(),
-          "settings":c.execute("SELECT key,value FROM settings WHERE key IN (?,?,?) ORDER BY key",("xrayTemplateConfig","subClashEnable","kjxvTutorialPresetV1")).fetchall()}
+          "settings":c.execute("SELECT key,value FROM settings WHERE key IN (?,?,?) ORDER BY key",("xrayTemplateConfig","subClashEnable","tutorialPresetV1")).fetchall()}
 before=json.load(open("/tmp/before.json"))
 def canonical(snapshot):
     nodes=[]

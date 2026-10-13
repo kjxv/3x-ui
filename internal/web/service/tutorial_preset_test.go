@@ -147,6 +147,39 @@ func TestTutorialPresetRepeatedApplyPreservesEditsAndDeletedNode(t *testing.T) {
 	}
 }
 
+func TestTutorialPresetLegacyMarkerPreservesEmptyPanel(t *testing.T) {
+	setupConflictDB(t)
+	db := database.GetDB()
+	// An old installation may have intentionally deleted all its nodes.
+	saved := TutorialPresetResult{Version: "3.6.0-preset.3", DirectPort: 443, ResidentialPort: 8443, SubscriptionID: "saved-subscription"}
+	encoded, err := json.Marshal(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Setting{Key: tutorialLegacyPresetMarker, Value: string(encoded)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	originalTemplate, _ := (&SettingService{}).GetXrayConfigTemplate()
+	result, err := ApplyTutorialPreset(TutorialPresetOptions{DirectPort: -1})
+	if err != nil || !result.AlreadyApplied || result.SubscriptionID != saved.SubscriptionID || result.Version != saved.Version {
+		t.Fatalf("legacy initialization must remain complete: %+v, %v", result, err)
+	}
+	for _, table := range []any{&model.Inbound{}, &model.ClientRecord{}} {
+		var count int64
+		if err := db.Model(table).Count(&count).Error; err != nil || count != 0 {
+			t.Fatalf("deleted legacy records were recreated: %d, %v", count, err)
+		}
+	}
+	actual, _ := (&SettingService{}).GetXrayConfigTemplate()
+	if actual != originalTemplate {
+		t.Fatal("legacy template was overwritten")
+	}
+	var count int64
+	if err := db.Model(&model.Setting{}).Where("key = ?", TutorialPresetMarker).Count(&count).Error; err != nil || count != 0 {
+		t.Fatal("upgrade created a new completion marker")
+	}
+}
+
 func TestTutorialPresetRefusesExistingPanel(t *testing.T) {
 	setupConflictDB(t)
 	db := database.GetDB()
@@ -170,7 +203,7 @@ func TestTutorialPresetRefusesExistingPanel(t *testing.T) {
 func TestTutorialPresetRollsBackOnPersistenceFailure(t *testing.T) {
 	setupConflictDB(t)
 	db := database.GetDB()
-	if err := db.Exec(`CREATE TRIGGER preset_failure BEFORE INSERT ON settings WHEN NEW.key = 'kjxvTutorialPresetV1' BEGIN SELECT RAISE(ABORT, 'preset rollback test'); END`).Error; err != nil {
+	if err := db.Exec(`CREATE TRIGGER preset_failure BEFORE INSERT ON settings WHEN NEW.key = 'tutorialPresetV1' BEGIN SELECT RAISE(ABORT, 'preset rollback test'); END`).Error; err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ApplyTutorialPreset(TutorialPresetOptions{}); err == nil {
