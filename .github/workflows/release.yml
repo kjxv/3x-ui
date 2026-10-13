@@ -5,8 +5,10 @@ on:
   push:
     branches:
       - "**"
+      - "!codex/v3.6.0-preset"
     tags:
       - "v*.*.*"
+      - "!v*-preset.*"
     paths:
       - "**.go"
       - "go.mod"
@@ -30,13 +32,6 @@ on:
       - ".github/workflows/release.yml"
 
 jobs:
-  preset:
-    if: contains(github.ref_name, '-preset.') || startsWith(github.ref_name, 'codex/v3.6.0-preset')
-    permissions:
-      contents: write
-    uses: ./.github/workflows/preset.yml
-    secrets: inherit
-
   build:
     if: ${{ !contains(github.ref_name, '-preset.') && !startsWith(github.ref_name, 'codex/v3.6.0-preset') }}
     permissions:

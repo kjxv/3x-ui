@@ -133,7 +133,7 @@ def main():
         work = pathlib.Path(temporary)
         env = dict(os.environ, XUI_DB_FOLDER=str(work), XUI_BIN_FOLDER=str(root / 'bin'),
                    XRAY_LOCATION_ASSET=str(root / 'bin'), XUI_ENABLE_FAIL2BAN='false', XUI_LOG_LEVEL='error')
-        binary = str(root / 'x-ui')
+        binary = str(root / ('x-ui.exe' if os.name == 'nt' else 'x-ui'))
         direct_port, residential_port, panel_port, subscription_port = port(), port(), port(), port()
         command = [binary, 'preset', '-publicAddress', '127.0.0.1', '-directPort', str(direct_port), '-residentialPort', str(residential_port)]
         subprocess.run(command, cwd=root, env=env, check=True, stdout=subprocess.DEVNULL)
@@ -141,7 +141,7 @@ def main():
         result = json.loads(database.execute("SELECT value FROM settings WHERE key='kjxvTutorialPresetV1'").fetchone()[0])
         inbounds = database.execute('SELECT tag, settings, stream_settings FROM inbounds ORDER BY sub_sort_index').fetchall()
         assert len(inbounds) == 2
-        core = str(root / 'bin/xray-linux-amd64')
+        core = str(root / ('bin/xray-windows-amd64.exe' if os.name == 'nt' else 'bin/xray-linux-amd64'))
         subprocess.run([core, 'version'], env=env, check=True, stdout=subprocess.DEVNULL)
         http_fixture = start_server(http.server.ThreadingHTTPServer(('127.0.0.1', 0), HTTP))
         servers.append(http_fixture)
@@ -172,7 +172,8 @@ def main():
         values = {'xrayTemplateConfig': json.dumps(config), 'webPort': str(panel_port), 'webListen': '127.0.0.1',
                   'webBasePath': '/', 'subPort': str(subscription_port), 'subListen': '127.0.0.1'}
         for key, value in values.items():
-            database.execute('INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key, value))
+            if database.execute('UPDATE settings SET value=? WHERE key=?', (value, key)).rowcount == 0:
+                database.execute('INSERT INTO settings(key,value) VALUES (?,?)', (key, value))
         database.commit()
         token_output = subprocess.check_output([binary, 'setting', '-getApiToken', 'true'], cwd=root, env=env, text=True)
         token = re.search(r'apiToken:\s*(\S+)', token_output).group(1)
