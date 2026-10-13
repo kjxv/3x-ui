@@ -67,7 +67,7 @@ import json,urllib.request
 result=json.load(open("/etc/x-ui/preset-result.json"))
 with urllib.request.urlopen("http://127.0.0.1:2096/clash/"+result["subscriptionId"],timeout=10) as r:
     text=r.read().decode()
-    assert text.count("type: vless") == 2
+    assert text.count("type: vless") == 2, "Unexpected Clash body: " + repr(text[:3000])
     assert "VLESS 直连" in text and "VLESS 住宅" in text
 PY
 kill "$panel_pid"

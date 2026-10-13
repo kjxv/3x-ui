@@ -5,7 +5,18 @@ name: Build fixed node preset
     - codex/v3.6.0-preset
     tags:
     - v*-preset.*
-  workflow_dispatch: {}
+    paths-ignore:
+    - .github/workflows/preset.yml
+    - deploy/preset/installer_test.sh
+    - deploy/preset/*_test.py
+  workflow_dispatch:
+    inputs:
+      artifact-run:
+        description: Existing build run to validate installer only (blank builds all
+          packages)
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
 jobs:
@@ -25,6 +36,7 @@ jobs:
       with:
         name: preset-frontend
         path: internal/web/dist
+    if: github.event_name != 'workflow_dispatch' || inputs.artifact-run == ''
   verify:
     runs-on: ubuntu-latest
     needs:
@@ -247,6 +259,8 @@ jobs:
       with:
         name: x-ui-linux-amd64
         path: packages
+        run-id: ${{ inputs.artifact-run }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Prepare package checksums
       run: 'cd packages
 
@@ -254,3 +268,21 @@ jobs:
     - name: Verify full installation, failed-first-install recovery and preserved
         edits
       run: bash deploy/preset/installer_test.sh packages
+    if: always() && !cancelled() && (needs.build.result == 'success' || (github.event_name
+      == 'workflow_dispatch' && inputs.artifact-run != ''))
+  published-install:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs:
+    - publish
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+        - ubuntu-latest
+        - ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v7
+    - name: Verify downloads and panel startup from published fixed release
+      run: bash deploy/test/smoke-noninteractive.sh "$GITHUB_REF_NAME"
