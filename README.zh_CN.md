@@ -68,35 +68,20 @@
 
 ## 快速开始
 
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
-```
-
-若要安装特定版本，请在命令后附加对应的标签（例如 `v3.4.0`）：
+在 Linux VPS 上以 root 运行，安装本仓库的 **3.6.0 默认节点预设版**：
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.4.0
+bash <(curl -fLsS https://raw.githubusercontent.com/kjxv/3x-ui/v3.6.0-preset.4/deploy/preset/install.sh)
 ```
 
-若要安装滚动更新的 **dev** 版本（来自 `main` 的最新逐次提交预发布版本，而非稳定版本），请传入 `dev-latest`：
+这是 `v3.6.0-preset.4` 的固定部署命令，后续维护继续使用同一条命令。
+首次安装自动创建 VLESS 直连和 VLESS 住宅两个节点、一个同时关联两个入站的 `01` 客户端、住宅 Socks5 出站及路由规则，并默认开启 Clash 订阅。
 
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
-```
+登录后台后，打开 **Xray 设置 → 出站**，编辑 **默认**，填写住宅代理的地址、端口及认证信息，保存后即可导入订阅使用。
 
-安装过程中会生成随机的用户名、密码和访问路径。安装完成后，运行 `x-ui` 打开管理菜单，您可以在其中启动/停止服务、查看或重置登录凭据、管理 SSL 证书等。
+安装过程中会生成随机的用户名、密码和访问路径。安装完成后，运行 `x-ui` 打开管理菜单。重新安装会保留已有节点和用户设置。
 
-完整文档请参阅 [项目Wiki](https://github.com/MHSanaei/3x-ui/wiki)。
-
-### 无人值守安装
-
-安装程序也可以**非交互式**运行，适用于 cloud-init。
-设置 `XUI_NONINTERACTIVE=1`（或在无 TTY 的情况下通过管道传入），它就会全程
-零提示地完成端到端安装，生成随机凭据并写入
-`/etc/x-ui/install-result.env`。请参阅 [`deploy/`](deploy/)：
-
-- [Cloud-init user-data](deploy/cloud-init/) — 在任意云平台上无人值守安装（Hetzner/AWS/DO/Vultr/GCP/Azure/Oracle）
-- [Hetzner Cloud 说明](deploy/marketplace/hetzner/) — 在 Hetzner 上基于 cloud-init 的部署
+详细步骤见[预设版安装说明](https://github.com/kjxv/3x-ui/blob/v3.6.0-preset.4/deploy/preset/README.md)。
 
 ## 支持的平台
 
