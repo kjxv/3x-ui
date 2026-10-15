@@ -28,6 +28,9 @@ func newGeodataEngine(t *testing.T) *gin.Engine {
 
 	dir := t.TempDir()
 	t.Setenv("XUI_BIN_FOLDER", dir)
+	// Keep fixtures isolated from the developer or CI runtime asset directory.
+	t.Setenv("XRAY_LOCATION_ASSET", "")
+	t.Setenv("xray.location.asset", "")
 	writeGeositeDB(t, dir)
 	writeGeoipDB(t, dir)
 

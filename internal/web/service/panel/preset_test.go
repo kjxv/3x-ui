@@ -1,8 +1,9 @@
 package panel
 
 import (
-	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"testing"
+
+	"github.com/mhsanaei/3x-ui/v3/internal/config"
 )
 
 func TestTutorialPresetDisablesUpstreamUpdates(t *testing.T) {
