@@ -26,7 +26,8 @@ func TestVlessFlowAllowed(t *testing.T) {
 		{"tcp tls", "tcp", "tls", noEnc, true},
 		{"tcp reality", "tcp", "reality", noEnc, true},
 		{"tcp none", "tcp", "none", noEnc, false},
-		{"tcp none vlessenc", "tcp", "none", enc, false},
+		{"tcp none vlessenc", "tcp", "none", enc, true},
+		{"ws none vlessenc", "ws", "none", enc, true},
 		{"xhttp none vlessenc", "xhttp", "none", enc, true},
 		{"xhttp reality vlessenc (#5232)", "xhttp", "reality", enc, true},
 		{"xhttp tls vlessenc", "xhttp", "tls", enc, true},
@@ -78,6 +79,16 @@ func TestGenVlessLink_NoFlowXhttpRealityWithoutVlessenc(t *testing.T) {
 	link := s.genVlessLink(flowTestInbound(xhttpRealityStream, "none"), "user")
 	if strings.Contains(link, "flow=") {
 		t.Fatalf("xhttp+reality without vlessenc must not carry a flow, got %q", link)
+	}
+}
+
+func TestGenVlessLink_DisableFlowSuppressesFlow(t *testing.T) {
+	s := &SubService{}
+	ib := flowTestInbound(xhttpRealityStream, testMlkemEncryption)
+	ib.DisableFlow = true
+	link := s.genVlessLink(ib, "user")
+	if strings.Contains(link, "flow=") {
+		t.Fatalf("DisableFlow inbound must not carry a flow even when the transport is capable, got %q", link)
 	}
 }
 

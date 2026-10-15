@@ -32,6 +32,7 @@ interface DnsServerModalProps {
 const STRATEGIES = DnsQueryStrategySchema.options;
 
 type DnsServerForm = {
+  id: string;
   address: string;
   port: number;
   domains: string[];
@@ -50,6 +51,7 @@ type DnsServerForm = {
 
 function defaultFormValues(): DnsServerForm {
   return {
+    id: '',
     address: 'localhost',
     port: 53,
     domains: [],
@@ -83,6 +85,7 @@ function valuesFromServer(server: DnsServerValue | null): DnsServerForm {
     skipFallback: data?.skipFallback ?? server.skipFallback ?? false,
     disableCache: data?.disableCache ?? server.disableCache ?? false,
     finalQuery: data?.finalQuery ?? server.finalQuery ?? false,
+    id: data?.id ?? server.id ?? '',
     tag: data?.tag ?? server.tag ?? '',
     clientIP: data?.clientIP ?? server.clientIP ?? '',
     serveStale: data?.serveStale ?? server.serveStale ?? false,
@@ -92,20 +95,21 @@ function valuesFromServer(server: DnsServerValue | null): DnsServerForm {
 }
 
 function valuesToWire(values: DnsServerForm): DnsServerValue {
-  const isPlain
-    = values.domains.length === 0
-    && values.expectedIPs.length === 0
-    && values.unexpectedIPs.length === 0
-    && values.port === 53
-    && values.queryStrategy === 'UseIP'
-    && values.skipFallback === false
-    && values.disableCache === false
-    && values.finalQuery === false
-    && !values.tag
-    && !values.clientIP
-    && values.serveStale === false
-    && values.serveExpiredTTL === 0
-    && values.timeoutMs === 4000;
+  const isPlain =
+    values.domains.length === 0 &&
+    values.expectedIPs.length === 0 &&
+    values.unexpectedIPs.length === 0 &&
+    values.port === 53 &&
+    values.queryStrategy === 'UseIP' &&
+    values.skipFallback === false &&
+    values.disableCache === false &&
+    values.finalQuery === false &&
+    !values.id &&
+    !values.tag &&
+    !values.clientIP &&
+    values.serveStale === false &&
+    values.serveExpiredTTL === 0 &&
+    values.timeoutMs === 4000;
   if (isPlain) return values.address;
 
   const out: Record<string, unknown> = {
@@ -122,6 +126,7 @@ function valuesToWire(values: DnsServerForm): DnsServerValue {
     timeoutMs: values.timeoutMs,
   };
   if (!isEncryptedDnsAddress(values.address)) out.port = values.port;
+  if (values.id) out.id = values.id;
   if (values.tag) out.tag = values.tag;
   if (values.clientIP) out.clientIP = values.clientIP;
   return out as DnsServerValue;
@@ -137,7 +142,13 @@ export default function DnsServerModal({
   onConfirm,
 }: DnsServerModalProps) {
   const { t } = useTranslation();
-  const methods = useForm<DnsServerForm>({ defaultValues: defaultFormValues() });
+  const methods = useForm<DnsServerForm>({
+    defaultValues: defaultFormValues(),
+  });
+  const address = useWatch({ control: methods.control, name: 'address' }) ?? '';
+  // Xray ignores port for DoH/DoHL/DoQL, so valuesToWire never stores one:
+  // offering the field there discards whatever is typed into it.
+  const portApplies = !isEncryptedDnsAddress(address);
   const domains = useWatch({ control: methods.control, name: 'domains' }) ?? [];
   const expectedIPs = useWatch({ control: methods.control, name: 'expectedIPs' }) ?? [];
   const unexpectedIPs = useWatch({ control: methods.control, name: 'unexpectedIPs' }) ?? [];
@@ -160,11 +171,7 @@ export default function DnsServerModal({
       onCancel={onClose}
     >
       <FormProvider {...methods}>
-        <Form
-          colon={false}
-          labelCol={{ md: { span: 8 } }}
-          wrapperCol={{ md: { span: 14 } }}
-        >
+        <Form colon={false} labelCol={{ md: { span: 8 } }} wrapperCol={{ md: { span: 14 } }}>
           <FormField
             label={t('pages.inbounds.address')}
             name="address"
@@ -172,12 +179,21 @@ export default function DnsServerModal({
           >
             <Input />
           </FormField>
+          {portApplies && (
+            <FormField
+              label={t('pages.inbounds.port')}
+              name="port"
+              rules={{ validate: rhfZodValidate(shape.port) }}
+            >
+              <InputNumber min={1} max={65535} />
+            </FormField>
+          )}
           <FormField
-            label={t('pages.inbounds.port')}
-            name="port"
-            rules={{ validate: rhfZodValidate(shape.port) }}
+            label={t('pages.xray.dns.serverId')}
+            tooltip={t('pages.xray.dns.serverIdDesc')}
+            name="id"
           >
-            <InputNumber min={1} max={65535} />
+            <Input />
           </FormField>
           <FormField label={t('pages.xray.dns.tag')} name="tag">
             <Input />
@@ -202,13 +218,27 @@ export default function DnsServerModal({
           <Divider style={{ margin: '5px 0' }} />
 
           <Form.Item label={t('pages.xray.dns.domains')}>
-            <Button size="small" type="primary" icon={<PlusOutlined />} aria-label={t('add')} onClick={() => methods.setValue('domains', [...domains, ''])} />
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlusOutlined />}
+              aria-label={t('add')}
+              onClick={() => methods.setValue('domains', [...domains, ''])}
+            />
             {domains.map((_, i) => (
               <Space.Compact key={i} block style={{ marginTop: 4 }}>
                 <FormField name={`domains.${i}`} noStyle>
                   <Input />
                 </FormField>
-                <InputAddon ariaLabel={t('remove')} onClick={() => methods.setValue('domains', domains.filter((__, idx) => idx !== i))}>
+                <InputAddon
+                  ariaLabel={t('remove')}
+                  onClick={() =>
+                    methods.setValue(
+                      'domains',
+                      domains.filter((__, idx) => idx !== i),
+                    )
+                  }
+                >
                   <MinusOutlined />
                 </InputAddon>
               </Space.Compact>
@@ -216,13 +246,27 @@ export default function DnsServerModal({
           </Form.Item>
 
           <Form.Item label={t('pages.xray.dns.expectIPs')}>
-            <Button size="small" type="primary" icon={<PlusOutlined />} aria-label={t('add')} onClick={() => methods.setValue('expectedIPs', [...expectedIPs, ''])} />
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlusOutlined />}
+              aria-label={t('add')}
+              onClick={() => methods.setValue('expectedIPs', [...expectedIPs, ''])}
+            />
             {expectedIPs.map((_, i) => (
               <Space.Compact key={i} block style={{ marginTop: 4 }}>
                 <FormField name={`expectedIPs.${i}`} noStyle>
                   <Input />
                 </FormField>
-                <InputAddon ariaLabel={t('remove')} onClick={() => methods.setValue('expectedIPs', expectedIPs.filter((__, idx) => idx !== i))}>
+                <InputAddon
+                  ariaLabel={t('remove')}
+                  onClick={() =>
+                    methods.setValue(
+                      'expectedIPs',
+                      expectedIPs.filter((__, idx) => idx !== i),
+                    )
+                  }
+                >
                   <MinusOutlined />
                 </InputAddon>
               </Space.Compact>
@@ -230,13 +274,27 @@ export default function DnsServerModal({
           </Form.Item>
 
           <Form.Item label={t('pages.xray.dns.unexpectIPs')}>
-            <Button size="small" type="primary" icon={<PlusOutlined />} aria-label={t('add')} onClick={() => methods.setValue('unexpectedIPs', [...unexpectedIPs, ''])} />
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlusOutlined />}
+              aria-label={t('add')}
+              onClick={() => methods.setValue('unexpectedIPs', [...unexpectedIPs, ''])}
+            />
             {unexpectedIPs.map((_, i) => (
               <Space.Compact key={i} block style={{ marginTop: 4 }}>
                 <FormField name={`unexpectedIPs.${i}`} noStyle>
                   <Input />
                 </FormField>
-                <InputAddon ariaLabel={t('remove')} onClick={() => methods.setValue('unexpectedIPs', unexpectedIPs.filter((__, idx) => idx !== i))}>
+                <InputAddon
+                  ariaLabel={t('remove')}
+                  onClick={() =>
+                    methods.setValue(
+                      'unexpectedIPs',
+                      unexpectedIPs.filter((__, idx) => idx !== i),
+                    )
+                  }
+                >
                   <MinusOutlined />
                 </InputAddon>
               </Space.Compact>
@@ -245,13 +303,21 @@ export default function DnsServerModal({
 
           <Divider style={{ margin: '5px 0' }} />
 
-          <FormField label={t('pages.xray.dns.skipFallback')} name="skipFallback" valueProp="checked">
+          <FormField
+            label={t('pages.xray.dns.skipFallback')}
+            name="skipFallback"
+            valueProp="checked"
+          >
             <Switch />
           </FormField>
           <FormField label={t('pages.xray.dns.finalQuery')} name="finalQuery" valueProp="checked">
             <Switch />
           </FormField>
-          <FormField label={t('pages.xray.dns.disableCache')} name="disableCache" valueProp="checked">
+          <FormField
+            label={t('pages.xray.dns.disableCache')}
+            name="disableCache"
+            valueProp="checked"
+          >
             <Switch />
           </FormField>
           <FormField label={t('pages.xray.dns.serveStale')} name="serveStale" valueProp="checked">

@@ -1,14 +1,5 @@
 import { z } from 'zod';
 
-export const WireguardDomainStrategySchema = z.enum([
-  'ForceIP',
-  'ForceIPv4',
-  'ForceIPv4v6',
-  'ForceIPv6',
-  'ForceIPv6v4',
-]);
-export type WireguardDomainStrategy = z.infer<typeof WireguardDomainStrategySchema>;
-
 // AntD InputNumber emits null (not undefined) when the user clears it, and
 // the form store hands that null straight to safeParse on submit — a bare
 // .optional() would reject it and block the save.
@@ -49,7 +40,10 @@ export const WireguardClientSchema = z.object({
   totalGB: z.number().int().min(0).default(0),
   expiryTime: z.number().int().default(0),
   enable: z.boolean().default(true),
-  tgId: z.union([z.number(), z.string()]).transform((v) => Number(v) || 0).default(0),
+  tgId: z
+    .union([z.number(), z.string()])
+    .transform((v) => Number(v) || 0)
+    .default(0),
   subId: z.string().default(''),
   comment: z.string().default(''),
   reset: z.number().int().min(0).default(0),
@@ -65,6 +59,12 @@ export const WireguardInboundSettingsSchema = z.object({
   peers: z.array(WireguardInboundPeerSchema).default([]),
   clients: z.array(WireguardClientSchema).default([]),
   noKernelTun: z.boolean().default(false),
-  domainStrategy: WireguardDomainStrategySchema.optional(),
+  // Admin-configurable base subnet new clients are auto-allocated from —
+  // mirrors AmneziaWG's settings.server.subnetIp/subnetCidr. Optional and
+  // left blank by default: an inbound that never sets this keeps the
+  // pre-existing behavior (infer from existing clients' own addresses, else
+  // fall back to 10.0.0.0/24 server-side).
+  subnetIp: z.string().default(''),
+  subnetCidr: optionalClearedInt(z.number().int().min(1).max(32)),
 });
 export type WireguardInboundSettings = z.infer<typeof WireguardInboundSettingsSchema>;

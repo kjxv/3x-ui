@@ -12,6 +12,9 @@ export const ProtocolSchema = z.enum([
   'tunnel',
   'tun',
   'mtproto',
+  'amneziawg',
+  'tuic',
+  'masque',
 ]);
 export type Protocol = z.infer<typeof ProtocolSchema>;
 
@@ -33,4 +36,7 @@ export const Protocols = Object.freeze({
   TUNNEL: 'tunnel',
   TUN: 'tun',
   MTPROTO: 'mtproto',
+  AMNEZIAWG: 'amneziawg',
+  TUIC: 'tuic',
+  MASQUE: 'masque',
 });

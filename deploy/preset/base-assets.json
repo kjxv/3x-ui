@@ -1,0 +1,94 @@
+{
+  "repository": "MHSanaei/3x-ui",
+  "tag": "v3.10.2",
+  "sourceCommit": "608ef4e4010bf83e2e78328e08f77efc051ad4d7",
+  "releaseId": 412867470,
+  "assets": [
+    {
+      "name": "x-ui-linux-386.tar.gz",
+      "sha256": "86279800adbc8cde68ff801ec6e486b974334d17c9b25347fee5aac2ec696464",
+      "size": 81218748
+    },
+    {
+      "name": "x-ui-linux-amd64.tar.gz",
+      "sha256": "bfda7921984e7a72555c38d4e861c7a8b67b3686b658608937de99682f1452d0",
+      "size": 83534439
+    },
+    {
+      "name": "x-ui-linux-arm64.tar.gz",
+      "sha256": "a867c65ce52ad49f6504dd4c9c395337dc92ba57ae478da4f1b7ddb624014ed5",
+      "size": 78890443
+    },
+    {
+      "name": "x-ui-linux-armv5.tar.gz",
+      "sha256": "7c338d59e957410992a03d22669c31d86c0b176998ae176413d60013af358aa4",
+      "size": 75730509
+    },
+    {
+      "name": "x-ui-linux-armv6.tar.gz",
+      "sha256": "fa842ac4845e51cf5c9cb8800cd0cd1b0ab091daa06c537866c7bb7eb3335206",
+      "size": 81075659
+    },
+    {
+      "name": "x-ui-linux-armv7.tar.gz",
+      "sha256": "26a3b94597b55d7465be55e5ce72f96967444998096cb5dacdb53f36a96482f7",
+      "size": 81011479
+    },
+    {
+      "name": "x-ui-linux-s390x.tar.gz",
+      "sha256": "6dc2c3af2c62e31025c78e53efeaba786d9e50966cd93527a285773ebbcc4e83",
+      "size": 77200095
+    },
+    {
+      "name": "x-ui-windows-amd64.zip",
+      "sha256": "67cf5f3a1d354f62bf5d0ff27e5a96663ba64761b7d26919b307ac6cca37419e",
+      "size": 91570295
+    }
+  ],
+  "xray": {
+    "repository": "XTLS/Xray-core",
+    "tag": "v26.6.27",
+    "assets": {
+      "linux-amd64": {
+        "name": "Xray-linux-64.zip",
+        "sha256": "b3e5902d06d6282fe53cfa2fc426058b9aeaa429b2c812e20887cd47f26d08bf",
+        "size": 21197571
+      },
+      "linux-arm64": {
+        "name": "Xray-linux-arm64-v8a.zip",
+        "sha256": "13a251379bea366c2cf10363ad71e75734193d401f26f518bf0c25e5c8f8c931",
+        "size": 19742958
+      },
+      "linux-armv7": {
+        "name": "Xray-linux-arm32-v7a.zip",
+        "sha256": "c77245cf9bfd6b8ae0fa8247cd65a3478f1951e9712fcde0f0dda4a31e2ac26c",
+        "size": 20250793
+      },
+      "linux-armv6": {
+        "name": "Xray-linux-arm32-v6.zip",
+        "sha256": "d6a48164f73281e5213a27ee46cac4078df786acf15014c3bad1cb49d1bc1ec6",
+        "size": 20269553
+      },
+      "linux-armv5": {
+        "name": "Xray-linux-arm32-v5.zip",
+        "sha256": "cec3aad9095bba4fdfcbff6dedaa11bc98f945e35186a1f228efaaa28e99c8b2",
+        "size": 20279097
+      },
+      "linux-386": {
+        "name": "Xray-linux-32.zip",
+        "sha256": "a30a7bc601ca4be80675ab862cbeae4cadb0bc3242ffb687fb6865b67b8c4e8f",
+        "size": 20315677
+      },
+      "linux-s390x": {
+        "name": "Xray-linux-s390x.zip",
+        "sha256": "be883d2b998b238421838fe29e8dd7b4b731e23def7712c3bbdac04e16319524",
+        "size": 20759267
+      },
+      "windows-amd64": {
+        "name": "Xray-windows-64.zip",
+        "sha256": "97f16a0701dbf931c9c4375399f8188e31615fdd5c863be5c612f946acd4dd01",
+        "size": 21024773
+      }
+    }
+  }
+}

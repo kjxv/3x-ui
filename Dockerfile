@@ -1,74 +1,35 @@
-# ========================================================
-# Stage: Frontend (Vite)
-# ========================================================
-FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
-WORKDIR /src/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ ./
-COPY internal/web/translation /src/internal/web/translation
-RUN npm run build
-
-# ========================================================
-# Stage: Builder
-# ========================================================
-FROM golang:1.26-alpine AS builder
-WORKDIR /app
+# Assemble the exact verified panel/runtime release from this fork.
+FROM alpine:3.23
 ARG TARGETARCH
-
-RUN apk --no-cache --update add \
-  build-base \
-  gcc \
-  curl \
-  unzip
-
-COPY . .
-COPY --from=frontend /src/internal/web/dist ./internal/web/dist
-
-ENV CGO_ENABLED=1
-ENV CGO_CFLAGS="-D_LARGEFILE64_SOURCE"
-RUN go build -ldflags "-w -s" -o build/x-ui main.go
-RUN ./DockerInit.sh "$TARGETARCH"
-
-# ========================================================
-# Stage: Final Image of 3x-ui
-# ========================================================
-FROM alpine
-ENV TZ=Asia/Tehran
+ARG TARGETVARIANT
 WORKDIR /app
-
-RUN apk add --no-cache --update \
-  ca-certificates \
-  tzdata \
-  fail2ban \
-  bash \
-  curl \
-  openssl
-
-COPY --from=builder /app/build/ /app/
-COPY --from=builder /app/DockerEntrypoint.sh /app/
-COPY --from=builder /app/x-ui.sh /usr/bin/x-ui
-COPY --from=builder /app/internal/web/translation /app/internal/web/translation
-
-
-# Configure fail2ban
+RUN apk add --no-cache ca-certificates tzdata fail2ban iptables ip6tables bash curl openssl tar
+RUN set -eu; \
+    case "$TARGETARCH/$TARGETVARIANT" in \
+      amd64/*) platform=amd64 ;; arm64/*) platform=arm64 ;; 386/*) platform=386 ;; \
+      arm/v7) platform=armv7 ;; arm/v6) platform=armv6 ;; arm/v5) platform=armv5 ;; \
+      s390x/*) platform=s390x ;; *) echo 'Unsupported architecture' >&2; exit 1 ;; \
+    esac; \
+    release='https://github.com/kjxv/3x-ui/releases/download/v3.10.2-preset'; \
+    curl -fLsS --retry 5 "$release/checksums.txt" -o /tmp/checksums.txt; \
+    archive="x-ui-linux-${platform}.tar.gz"; \
+    curl -fLsS --retry 5 "$release/$archive" -o "/tmp/$archive"; \
+    expected=$(awk -v name="$archive" '$2 == name {print $1}' /tmp/checksums.txt); \
+    test "${#expected}" = 64; \
+    printf '%s  %s\n' "$expected" "/tmp/$archive" | sha256sum -c -; \
+    tar -xzf "/tmp/$archive" --strip-components=1 -C /app; \
+    if [ "$TARGETARCH" = arm ]; then \
+      mv "bin/xray-linux-$platform" bin/xray-linux-arm32; \
+      if [ -f "bin/mtg-linux-$platform" ]; then mv "bin/mtg-linux-$platform" bin/mtg-linux-arm; fi; \
+    fi; \
+    cp x-ui.sh /usr/bin/x-ui; chmod +x /app/x-ui /usr/bin/x-ui /app/bin/xray-*; \
+    rm -f "/tmp/$archive" /tmp/checksums.txt
 RUN rm -f /etc/fail2ban/jail.d/alpine-ssh.conf \
-  && cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local \
-  && sed -i "s/^\[ssh\]$/&\nenabled = false/" /etc/fail2ban/jail.local \
-  && sed -i "s/^\[sshd\]$/&\nenabled = false/" /etc/fail2ban/jail.local \
-  && sed -i "s/#allowipv6 = auto/allowipv6 = auto/g" /etc/fail2ban/fail2ban.conf
-
-RUN chmod +x \
-  /app/DockerEntrypoint.sh \
-  /app/x-ui \
-  /usr/bin/x-ui
-
-ENV XUI_IN_DOCKER="true"
-ENV XUI_MAIN_FOLDER="/app"
-ENV XUI_ENABLE_FAIL2BAN="true"
-ENV XUI_DB_TYPE=""
-ENV XUI_DB_DSN=""
-EXPOSE 2053
-VOLUME [ "/etc/x-ui" ]
-CMD [ "./x-ui" ]
-ENTRYPOINT [ "/app/DockerEntrypoint.sh" ]
+    && cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local \
+    && sed -i 's/^\[sshd\]$/&\nenabled = false/' /etc/fail2ban/jail.local
+COPY DockerEntrypoint.sh /app/
+RUN chmod +x /app/DockerEntrypoint.sh
+ENV TZ=Etc/UTC XUI_IN_DOCKER=true XUI_MAIN_FOLDER=/app XUI_BIN_FOLDER=/app/bin XRAY_LOCATION_ASSET=/app/bin XUI_ENABLE_FAIL2BAN=true
+EXPOSE 2053 2096
+VOLUME ["/etc/x-ui"]
+ENTRYPOINT ["/app/DockerEntrypoint.sh"]

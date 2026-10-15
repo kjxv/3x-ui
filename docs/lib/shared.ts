@@ -8,16 +8,16 @@ export const docsContentRoute = '/llms.mdx/docs';
 // The 3x-ui product repository — used for the navbar GitHub link,
 // build-time star/release stats, and install commands.
 export const productRepo = {
-  user: 'MHSanaei',
+  user: 'kjxv',
   repo: '3x-ui',
-  branch: 'main',
+  branch: 'codex/v3.10.2-preset',
 };
 
 // Where these docs live in the 3x-ui monorepo — used for "Edit on GitHub" links.
 export const gitConfig = {
-  user: 'MHSanaei',
+  user: 'kjxv',
   repo: '3x-ui',
-  branch: 'main',
+  branch: 'codex/v3.10.2-preset',
   docsDir: 'docs/content/docs',
 };
 

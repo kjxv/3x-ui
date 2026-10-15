@@ -1,5 +1,16 @@
-import { useEffect, useRef } from 'react';
-import { AutoComplete, Button, Divider, Form, Input, InputNumber, Select, Space, Switch } from 'antd';
+import { useEffect, useRef, useState } from 'react';
+import {
+  AutoComplete,
+  Button,
+  Divider,
+  Form,
+  Input,
+  InputNumber,
+  Select,
+  Space,
+  Switch,
+  Typography,
+} from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { FormInstance } from 'antd/es/form';
@@ -8,8 +19,13 @@ import type { NamePath } from 'antd/es/form/interface';
 import { RandomUtil } from '@/utils';
 import { activateOnKey } from '@/utils/a11y';
 import { OutboundProtocols, UTLS_FINGERPRINT } from '@/schemas/primitives';
+import { upgradeLegacyUdpHop } from '@/lib/xray/udphop-mask';
+import { upgradeLegacyXdnsMasks, XDNS_LEGACY_EDNS0 } from '@/lib/xray/xdns-mask';
 
-const UTLS_FINGERPRINT_OPTIONS = Object.values(UTLS_FINGERPRINT).map((value) => ({ value, label: value }));
+const UTLS_FINGERPRINT_OPTIONS = Object.values(UTLS_FINGERPRINT).map((value) => ({
+  value,
+  label: value,
+}));
 
 export interface FinalMaskFormProps {
   name: NamePath;
@@ -20,9 +36,12 @@ export interface FinalMaskFormProps {
   // network/protocol. Used by the global sub-JSON finalmask editor where
   // the masks apply to every stream rather than one specific transport.
   showAll?: boolean;
+  // udphop runs only on the dialing side (the core refuses it on a listener), so a server
+  // keeps the advertised hop range in quicParams.udpHop and a client gets the mask.
+  side?: 'server' | 'client';
 }
 
-const TCP_NETWORKS = ['raw', 'tcp', 'httpupgrade', 'ws', 'grpc', 'xhttp'];
+const TCP_NETWORKS = ['raw', 'tcp', 'httpupgrade', 'ws', 'grpc', 'xhttp', 'xdrive'];
 const DEFAULT_GECKO_PACKET_SIZE = { min: 512, max: 1200 };
 // Xray-core caps the Gecko output packet size at its internal buffer (2048)
 // and needs 1 <= min <= max; mirror those bounds so the panel rejects what
@@ -37,8 +56,11 @@ export function parseGeckoPacketSize(value: unknown): { min: number; max: number
   const min = Number(match[1]);
   const max = Number(match[2]);
   if (
-    !Number.isSafeInteger(min) || !Number.isSafeInteger(max)
-    || min < GECKO_MIN_PACKET_SIZE || max < min || max > GECKO_MAX_PACKET_SIZE
+    !Number.isSafeInteger(min) ||
+    !Number.isSafeInteger(max) ||
+    min < GECKO_MIN_PACKET_SIZE ||
+    max < min ||
+    max > GECKO_MAX_PACKET_SIZE
   ) {
     return null;
   }
@@ -59,9 +81,25 @@ function splitGeckoPacketSize(value: unknown): { min: number | null; max: number
 
 function validateGeckoPacketSize(_rule: unknown, value: unknown): Promise<void> {
   if (parseGeckoPacketSize(value)) return Promise.resolve();
-  return Promise.reject(new Error(
-    `Use a range like 512-1200 (${GECKO_MIN_PACKET_SIZE}-${GECKO_MAX_PACKET_SIZE}, max ≥ min)`,
-  ));
+  return Promise.reject(
+    new Error(
+      `Use a range like 512-1200 (${GECKO_MIN_PACKET_SIZE}-${GECKO_MAX_PACKET_SIZE}, max ≥ min)`,
+    ),
+  );
+}
+
+// xray-core's salamander smPSKMinLen counts bytes; a shorter password loads, then the listener
+// (stopping Xray) or the dial fails, so the backend refuses it at save too.
+const SALAMANDER_MIN_PSK_BYTES = 4;
+
+function validateSalamanderPassword(_rule: unknown, value: unknown): Promise<void> {
+  const bytes = new TextEncoder().encode(typeof value === 'string' ? value : '').length;
+  if (bytes >= SALAMANDER_MIN_PSK_BYTES) return Promise.resolve();
+  return Promise.reject(
+    new Error(
+      `Use at least ${SALAMANDER_MIN_PSK_BYTES} bytes; xray-core refuses a shorter password`,
+    ),
+  );
 }
 
 function asPath(name: NamePath): (string | number)[] {
@@ -75,17 +113,29 @@ function defaultTcpMaskSettings(type: string): Record<string, unknown> {
       // a single length entry reproduces the legacy single-range behavior.
       return { packets: '1-3', lengths: ['100-200'], delays: [], maxSplit: '' };
     case 'sudoku':
-      return {
-        password: '', ascii: '', customTable: '', customTables: [],
-        paddingMin: 0, paddingMax: 0,
-      };
+      return defaultSudokuSettings();
     case 'header-custom':
       return { clients: [], servers: [] };
     case 'xmc':
-      return { hostname: '', profiles: [defaultXmcProfile()], password: RandomUtil.randomLowerAndNum(16) };
+      return {
+        hostname: '',
+        profiles: [defaultXmcProfile()],
+        password: RandomUtil.randomLowerAndNum(16),
+      };
     default:
       return {};
   }
+}
+
+function defaultSudokuSettings(): Record<string, unknown> {
+  return {
+    password: '',
+    ascii: '',
+    customTable: '',
+    customTables: [],
+    paddingMin: 0,
+    paddingMax: 0,
+  };
 }
 
 function defaultXmcProfile(): Record<string, unknown> {
@@ -99,7 +149,10 @@ function defaultXmcProfile(): Record<string, unknown> {
 // legacy username cannot be upgraded automatically — carry it into a profile
 // stub instead, which keeps the operator's player names visible and leaves the
 // per-field validators pointing at exactly what still has to be filled in.
-export function migrateXmcSettings(settings: Record<string, unknown>): { next: Record<string, unknown>; changed: boolean } {
+export function migrateXmcSettings(settings: Record<string, unknown>): {
+  next: Record<string, unknown>;
+  changed: boolean;
+} {
   const out: Record<string, unknown> = { ...settings };
   let changed = false;
   if (!Array.isArray(out.profiles) && Array.isArray(out.usernames)) {
@@ -123,7 +176,10 @@ export function migrateXmcSettings(settings: Record<string, unknown>): { next: R
 // with `lengths`/`delays` arrays (the singular keys remain in core only as a
 // fallback). Lift any legacy singular value into a one-element array so the
 // list UI shows it, and drop the singular key so we never emit both.
-function migrateFragmentSettings(settings: Record<string, unknown>): { next: Record<string, unknown>; changed: boolean } {
+function migrateFragmentSettings(settings: Record<string, unknown>): {
+  next: Record<string, unknown>;
+  changed: boolean;
+} {
   const out: Record<string, unknown> = { ...settings };
   let changed = false;
   if (!Array.isArray(out.lengths) && typeof out.length === 'string' && out.length.trim() !== '') {
@@ -161,6 +217,10 @@ function defaultUdpMaskSettings(type: string): Record<string, unknown> {
       return { client: [], server: [] };
     case 'noise':
       return { reset: 0, noise: [] };
+    case 'sudoku':
+      return defaultSudokuSettings();
+    case 'udphop':
+      return { mode: 'intervalRemote', interval: '5-10', remotePorts: '' };
     default:
       return {};
   }
@@ -176,7 +236,11 @@ function defaultUdpClientServerItem(): Record<string, unknown> {
 
 function defaultNoiseItem(): Record<string, unknown> {
   return {
-    rand: '1-8192', randRange: '0-255', type: 'array', packet: [], delay: '10-20',
+    rand: '1-8192',
+    randRange: '0-255',
+    type: 'array',
+    packet: [],
+    delay: '10-20',
   };
 }
 
@@ -199,32 +263,51 @@ function defaultUdpHop(): Record<string, unknown> {
   return { ports: '20000-50000', interval: '5-10' };
 }
 
-export default function FinalMaskForm({ name, network, protocol, form, showAll = false }: FinalMaskFormProps) {
+export default function FinalMaskForm({
+  name,
+  network,
+  protocol,
+  form,
+  showAll = false,
+  side = 'client',
+}: FinalMaskFormProps) {
   const base = asPath(name);
 
-  // Migrate legacy TCP mask shapes once on mount so configs saved before
-  // #6334 (fragment ranges) and #6487 (xmc profiles) render in the list UI.
+  // Migrate legacy mask shapes once on mount so configs saved before #6334 (fragment
+  // ranges), #6487 (xmc profiles) and #7090 (xdns names/addrs) render in the list UI.
   const migratedRef = useRef(false);
   useEffect(() => {
     if (migratedRef.current) return;
     migratedRef.current = true;
     const tcp = form.getFieldValue([...base, 'tcp']);
-    if (!Array.isArray(tcp)) return;
-    let anyChanged = false;
-    const next = tcp.map((mask) => {
-      if (!mask || typeof mask !== 'object') return mask;
-      const m = mask as Record<string, unknown>;
-      if (m.type !== 'fragment' && m.type !== 'xmc') return mask;
-      if (!m.settings || typeof m.settings !== 'object') return mask;
-      const settings = m.settings as Record<string, unknown>;
-      const { next: migrated, changed } = m.type === 'fragment'
-        ? migrateFragmentSettings(settings)
-        : migrateXmcSettings(settings);
-      if (!changed) return mask;
-      anyChanged = true;
-      return { ...m, settings: migrated };
-    });
-    if (anyChanged) form.setFieldValue([...base, 'tcp'], next);
+    if (Array.isArray(tcp)) {
+      let anyChanged = false;
+      const next = tcp.map((mask) => {
+        if (!mask || typeof mask !== 'object') return mask;
+        const m = mask as Record<string, unknown>;
+        if (m.type !== 'fragment' && m.type !== 'xmc') return mask;
+        if (!m.settings || typeof m.settings !== 'object') return mask;
+        const settings = m.settings as Record<string, unknown>;
+        const { next: migrated, changed } =
+          m.type === 'fragment' ? migrateFragmentSettings(settings) : migrateXmcSettings(settings);
+        if (!changed) return mask;
+        anyChanged = true;
+        return { ...m, settings: migrated };
+      });
+      if (anyChanged) form.setFieldValue([...base, 'tcp'], next);
+    }
+    const udp = form.getFieldValue([...base, 'udp']);
+    if (Array.isArray(udp)) {
+      const { next, changed } = upgradeLegacyXdnsMasks(udp);
+      if (changed) form.setFieldValue([...base, 'udp'], next);
+    }
+    if (side === 'client') {
+      const finalmask = form.getFieldValue(base) as Record<string, unknown> | undefined;
+      if (finalmask && typeof finalmask === 'object') {
+        const { next, changed } = upgradeLegacyUdpHop(finalmask);
+        if (changed) form.setFieldValue(base, next);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -234,7 +317,13 @@ export default function FinalMaskForm({ name, network, protocol, form, showAll =
   // wrap anything even though the leftover network value may be 'tcp'.
   const isWireguard = protocol === 'wireguard';
   const showTcp = showAll || (!isWireguard && TCP_NETWORKS.includes(network));
-  const showUdp = showAll || isHysteria || isWireguard || network === 'kcp';
+  // xhttp's HTTP/3 dial runs the UDP masks too, which is where a client's udphop lives.
+  const showUdp =
+    showAll ||
+    isHysteria ||
+    isWireguard ||
+    network === 'kcp' ||
+    (side === 'client' && network === 'xhttp');
   const showQuic = showAll || isHysteria || network === 'xhttp';
   const quicParams = Form.useWatch([...base, 'quicParams'], { form, preserve: true });
   const hasQuicParams = quicParams != null;
@@ -244,7 +333,16 @@ export default function FinalMaskForm({ name, network, protocol, form, showAll =
   return (
     <>
       {showTcp && <TcpMasksList base={base} form={form} />}
-      {showUdp && <UdpMasksList base={base} form={form} isHysteria={isHysteria} isWireguard={isWireguard} network={network} />}
+      {showUdp && (
+        <UdpMasksList
+          base={base}
+          form={form}
+          isHysteria={isHysteria}
+          isWireguard={isWireguard}
+          network={network}
+          allowUdpHop={side === 'client'}
+        />
+      )}
       {showQuic && (
         <>
           <Form.Item label="QUIC Params">
@@ -255,7 +353,13 @@ export default function FinalMaskForm({ name, network, protocol, form, showAll =
               }}
             />
           </Form.Item>
-          {hasQuicParams && <QuicParamsForm base={[...base, 'quicParams']} form={form} />}
+          {hasQuicParams && (
+            <QuicParamsForm
+              base={[...base, 'quicParams']}
+              form={form}
+              showUdpHop={side === 'server'}
+            />
+          )}
         </>
       )}
     </>
@@ -274,7 +378,9 @@ function TcpMasksList({ base, form }: { base: (string | number)[]; form: FormIns
               size="small"
               icon={<PlusOutlined />}
               aria-label={t('add')}
-              onClick={() => add({ type: 'fragment', settings: defaultTcpMaskSettings('fragment') })}
+              onClick={() =>
+                add({ type: 'fragment', settings: defaultTcpMaskSettings('fragment') })
+              }
             />
           </Form.Item>
           {fields.map((field, mIdx) => (
@@ -294,7 +400,11 @@ function TcpMasksList({ base, form }: { base: (string | number)[]; form: FormIns
 }
 
 function TcpMaskItem({
-  fieldName, displayIndex, form, listPath, onRemove,
+  fieldName,
+  displayIndex,
+  form,
+  listPath,
+  onRemove,
 }: {
   fieldName: number;
   displayIndex: number;
@@ -382,24 +492,7 @@ function TcpMaskItem({
               </>
             );
           }
-          if (type === 'sudoku') {
-            return (
-              <>
-                <Form.Item label="Password" name={[fieldName, 'settings', 'password']}><Input /></Form.Item>
-                <Form.Item label="ASCII" name={[fieldName, 'settings', 'ascii']}><Input /></Form.Item>
-                <Form.Item label="Custom Table" name={[fieldName, 'settings', 'customTable']}><Input /></Form.Item>
-                <Form.Item label="Custom Tables" name={[fieldName, 'settings', 'customTables']}>
-                  <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',']} />
-                </Form.Item>
-                <Form.Item label="Padding Min" name={[fieldName, 'settings', 'paddingMin']}>
-                  <InputNumber min={0} />
-                </Form.Item>
-                <Form.Item label="Padding Max" name={[fieldName, 'settings', 'paddingMax']}>
-                  <InputNumber min={0} />
-                </Form.Item>
-              </>
-            );
-          }
+          if (type === 'sudoku') return <SudokuSettings fieldName={fieldName} />;
           if (type === 'header-custom') {
             return (
               <HeaderCustomGroups
@@ -423,15 +516,20 @@ function TcpMaskItem({
                       noStyle
                       rules={[{ required: true, message: 'Password is required' }]}
                     >
-                      <Input placeholder="Obfuscation password" style={{ width: 'calc(100% - 32px)' }} />
+                      <Input
+                        placeholder="Obfuscation password"
+                        style={{ width: 'calc(100% - 32px)' }}
+                      />
                     </Form.Item>
                     <Button
                       icon={<ReloadOutlined />}
                       aria-label={t('regenerate')}
-                      onClick={() => form.setFieldValue(
-                        [...absolutePath, 'settings', 'password'],
-                        RandomUtil.randomLowerAndNum(16),
-                      )}
+                      onClick={() =>
+                        form.setFieldValue(
+                          [...absolutePath, 'settings', 'password'],
+                          RandomUtil.randomLowerAndNum(16),
+                        )
+                      }
                     />
                   </Space.Compact>
                 </Form.Item>
@@ -442,6 +540,31 @@ function TcpMaskItem({
         }}
       </Form.Item>
     </div>
+  );
+}
+
+function SudokuSettings({ fieldName }: { fieldName: number }) {
+  return (
+    <>
+      <Form.Item label="Password" name={[fieldName, 'settings', 'password']}>
+        <Input />
+      </Form.Item>
+      <Form.Item label="ASCII" name={[fieldName, 'settings', 'ascii']}>
+        <Input />
+      </Form.Item>
+      <Form.Item label="Custom Table" name={[fieldName, 'settings', 'customTable']}>
+        <Input />
+      </Form.Item>
+      <Form.Item label="Custom Tables" name={[fieldName, 'settings', 'customTables']}>
+        <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',']} />
+      </Form.Item>
+      <Form.Item label="Padding Min" name={[fieldName, 'settings', 'paddingMin']}>
+        <InputNumber min={0} />
+      </Form.Item>
+      <Form.Item label="Padding Max" name={[fieldName, 'settings', 'paddingMax']}>
+        <InputNumber min={0} />
+      </Form.Item>
+    </>
   );
 }
 
@@ -458,7 +581,9 @@ function validateFragmentPackets(_rule: unknown, value: unknown): Promise<void> 
 function validateFragmentLength(_rule: unknown, value: unknown): Promise<void> {
   const str = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
   if (str.length === 0) {
-    return Promise.reject(new Error('Length is required — xray rejects a fragment mask whose LengthMin is 0'));
+    return Promise.reject(
+      new Error('Length is required — xray rejects a fragment mask whose LengthMin is 0'),
+    );
   }
   const min = Number(str.split('-')[0]);
   if (!Number.isFinite(min) || min <= 0) {
@@ -473,7 +598,9 @@ function validateFragmentLength(_rule: unknown, value: unknown): Promise<void> {
 function validateFragmentDelayEntry(_rule: unknown, value: unknown): Promise<void> {
   const str = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
   if (str.length === 0) {
-    return Promise.reject(new Error("Delay is required — remove the row if you don't want a delay"));
+    return Promise.reject(
+      new Error("Delay is required — remove the row if you don't want a delay"),
+    );
   }
   if (!/^\d+(?:-\d+)?$/.test(str)) {
     return Promise.reject(new Error('Use a delay in ms, e.g. 10 or 10-20'));
@@ -486,7 +613,11 @@ function validateFragmentDelayEntry(_rule: unknown, value: unknown): Promise<voi
 // fragment segment N, clamping to the last entry. `minItems` keeps at least
 // one length row so the config never collapses to an empty (rejected) list.
 function FragmentRangeList({
-  listName, label, placeholder, validator, minItems = 0,
+  listName,
+  label,
+  placeholder,
+  validator,
+  minItems = 0,
 }: {
   listName: (string | number)[];
   label: string;
@@ -500,7 +631,13 @@ function FragmentRangeList({
       {(fields, { add, remove }) => (
         <>
           <Form.Item label={label}>
-            <Button type="primary" size="small" icon={<PlusOutlined />} aria-label={t('add')} onClick={() => add('')} />
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              aria-label={t('add')}
+              onClick={() => add('')}
+            />
           </Form.Item>
           {fields.map((field, idx) => (
             <Form.Item
@@ -511,8 +648,8 @@ function FragmentRangeList({
             >
               <Input
                 placeholder={placeholder}
-                suffix={fields.length > minItems
-                  ? (
+                suffix={
+                  fields.length > minItems ? (
                     <DeleteOutlined
                       className="danger-icon"
                       role="button"
@@ -521,8 +658,8 @@ function FragmentRangeList({
                       onClick={() => remove(field.name)}
                       onKeyDown={activateOnKey(() => remove(field.name))}
                     />
-                  )
-                  : null}
+                  ) : null
+                }
               />
             </Form.Item>
           ))}
@@ -560,7 +697,8 @@ function getDeep(obj: unknown, path: (string | number)[]): unknown {
 // Mojang hands the profile UUID back undashed from the session server and
 // dashed from most other endpoints; xray-core parses either, so accept both
 // rather than forcing the operator to reformat what they pasted.
-const XMC_UUID_PATTERN = /^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32})$/;
+const XMC_UUID_PATTERN =
+  /^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{32})$/;
 const XMC_USERNAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/;
 
 function validateXmcUsername(_rule: unknown, value: unknown): Promise<void> {
@@ -626,14 +764,20 @@ function XmcProfilesList({ tcpFieldName }: { tcpFieldName: number }) {
                 name={[profile.name, 'texturesValue']}
                 rules={[{ required: true, message: 'Textures value is required' }]}
               >
-                <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="Base64 value from the session profile" />
+                <Input.TextArea
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  placeholder="Base64 value from the session profile"
+                />
               </Form.Item>
               <Form.Item
                 label="Textures Signature"
                 name={[profile.name, 'texturesSignature']}
                 rules={[{ required: true, message: 'Textures signature is required' }]}
               >
-                <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder="Base64 signature from the session profile" />
+                <Input.TextArea
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  placeholder="Base64 signature from the session profile"
+                />
               </Form.Item>
             </div>
           ))}
@@ -643,8 +787,20 @@ function XmcProfilesList({ tcpFieldName }: { tcpFieldName: number }) {
   );
 }
 
+const HEADER_CUSTOM_TCP_GROUPS = [
+  { key: 'clients', label: 'Clients', tooltip: undefined },
+  { key: 'servers', label: 'Servers', tooltip: undefined },
+  {
+    key: 'errors',
+    label: 'Errors',
+    tooltip: 'Sent instead when the matching client group fails to match, e.g. an HTTP 400',
+  },
+] as const;
+
 function HeaderCustomGroups({
-  tcpFieldName, form, absoluteSettingsPath,
+  tcpFieldName,
+  form,
+  absoluteSettingsPath,
 }: {
   tcpFieldName: number;
   form: FormInstance;
@@ -653,11 +809,11 @@ function HeaderCustomGroups({
   const { t } = useTranslation();
   return (
     <>
-      {(['clients', 'servers'] as const).map((groupKey) => (
+      {HEADER_CUSTOM_TCP_GROUPS.map(({ key: groupKey, label, tooltip }) => (
         <Form.List key={groupKey} name={[tcpFieldName, 'settings', groupKey]}>
           {(groups, { add: addGroup, remove: removeGroup }) => (
             <>
-              <Form.Item label={groupKey === 'clients' ? 'Clients' : 'Servers'}>
+              <Form.Item label={label} tooltip={tooltip}>
                 <Button
                   type="primary"
                   size="small"
@@ -669,7 +825,7 @@ function HeaderCustomGroups({
               {groups.map((group, gi) => (
                 <div key={group.key}>
                   <Divider style={{ margin: 0 }}>
-                    {groupKey === 'clients' ? 'Clients' : 'Servers'} Group {gi + 1}
+                    {label} Group {gi + 1}
                     <DeleteOutlined
                       className="danger-icon"
                       role="button"
@@ -695,8 +851,14 @@ function HeaderCustomGroups({
                             key={item.key}
                             fieldName={item.name}
                             form={form}
-                            absoluteItemPath={[...absoluteSettingsPath, groupKey, group.name, item.name]}
+                            absoluteItemPath={[
+                              ...absoluteSettingsPath,
+                              groupKey,
+                              group.name,
+                              item.name,
+                            ]}
                             delayMode="number"
+                            allowVariables
                             onRemove={() => removeItem(item.name)}
                           />
                         ))}
@@ -714,8 +876,20 @@ function HeaderCustomGroups({
 }
 
 function UdpMasksList({
-  base, form, isHysteria, isWireguard, network,
-}: { base: (string | number)[]; form: FormInstance; isHysteria: boolean; isWireguard: boolean; network: string }) {
+  base,
+  form,
+  isHysteria,
+  isWireguard,
+  network,
+  allowUdpHop,
+}: {
+  base: (string | number)[];
+  form: FormInstance;
+  isHysteria: boolean;
+  isWireguard: boolean;
+  network: string;
+  allowUdpHop: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <Form.List name={[...base, 'udp']}>
@@ -743,6 +917,7 @@ function UdpMasksList({
               isHysteria={isHysteria}
               isWireguard={isWireguard}
               network={network}
+              allowUdpHop={allowUdpHop}
               onRemove={() => remove(field.name)}
             />
           ))}
@@ -753,7 +928,15 @@ function UdpMasksList({
 }
 
 function UdpMaskItem({
-  fieldName, displayIndex, form, listPath, isHysteria, isWireguard, network, onRemove,
+  fieldName,
+  displayIndex,
+  form,
+  listPath,
+  isHysteria,
+  isWireguard,
+  network,
+  allowUdpHop,
+  onRemove,
 }: {
   fieldName: number;
   displayIndex: number;
@@ -762,6 +945,7 @@ function UdpMaskItem({
   isHysteria: boolean;
   isWireguard: boolean;
   network: string;
+  allowUdpHop: boolean;
   onRemove: () => void;
 }) {
   const absolutePath = [...listPath, fieldName];
@@ -775,19 +959,22 @@ function UdpMaskItem({
     }
   };
 
+  const udpHopOption = allowUdpHop ? [{ value: 'udphop', label: 'UDP Hop' }] : [];
   const options = isHysteria
-    ? [{ value: 'salamander', label: 'Salamander (Hysteria2)' }]
+    ? [{ value: 'salamander', label: 'Salamander (Hysteria2)' }, ...udpHopOption]
     : [
-      // Salamander is the mask xray-core's own wireguard finalmask example
-      // uses; it stays hysteria-only elsewhere to keep legacy parity.
-      ...(isWireguard ? [{ value: 'salamander', label: 'Salamander' }] : []),
-      { value: 'mkcp-legacy', label: 'mKCP Legacy' },
-      { value: 'xdns', label: 'xDNS' },
-      { value: 'xicmp', label: 'xICMP' },
-      { value: 'realm', label: 'Realm' },
-      { value: 'header-custom', label: 'Header Custom' },
-      { value: 'noise', label: 'Noise' },
-    ];
+        // Salamander is the mask xray-core's own wireguard finalmask example
+        // uses; it stays hysteria-only elsewhere to keep legacy parity.
+        ...(isWireguard ? [{ value: 'salamander', label: 'Salamander' }] : []),
+        { value: 'mkcp-legacy', label: 'mKCP Legacy' },
+        { value: 'xdns', label: 'xDNS' },
+        { value: 'xicmp', label: 'xICMP' },
+        { value: 'realm', label: 'Realm' },
+        { value: 'header-custom', label: 'Header Custom' },
+        { value: 'noise', label: 'Noise' },
+        { value: 'sudoku', label: 'Sudoku' },
+        ...udpHopOption,
+      ];
 
   return (
     <div>
@@ -809,12 +996,20 @@ function UdpMaskItem({
 
       <Form.Item
         noStyle
-        shouldUpdate={(prev, curr) => getDeep(prev, [...absolutePath, 'type']) !== getDeep(curr, [...absolutePath, 'type'])}
+        shouldUpdate={(prev, curr) =>
+          getDeep(prev, [...absolutePath, 'type']) !== getDeep(curr, [...absolutePath, 'type'])
+        }
       >
         {({ getFieldValue }) => {
           const type = getFieldValue([...absolutePath, 'type']) as string | undefined;
           if (type === 'salamander') {
-            return <SalamanderUdpMaskSettings fieldName={fieldName} form={form} absolutePath={absolutePath} />;
+            return (
+              <SalamanderUdpMaskSettings
+                fieldName={fieldName}
+                form={form}
+                absolutePath={absolutePath}
+              />
+            );
           }
           if (type === 'mkcp-legacy') {
             return (
@@ -839,16 +1034,19 @@ function UdpMaskItem({
             );
           }
           if (type === 'xdns') {
-            return (
-              <Form.Item label="Domains" name={[fieldName, 'settings', 'domains']}>
-                <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',']} />
-              </Form.Item>
-            );
+            return <XdnsSettings udpFieldName={fieldName} />;
+          }
+          if (type === 'udphop') {
+            return <UdpHopSettings udpFieldName={fieldName} />;
           }
           if (type === 'xicmp') {
             return (
               <>
-                <Form.Item label="Dgram" name={[fieldName, 'settings', 'dgram']} valuePropName="checked">
+                <Form.Item
+                  label="Dgram"
+                  name={[fieldName, 'settings', 'dgram']}
+                  valuePropName="checked"
+                >
                   <Switch />
                 </Form.Item>
                 <Form.Item label="IPs" name={[fieldName, 'settings', 'ips']}>
@@ -864,10 +1062,50 @@ function UdpMaskItem({
                   <Input placeholder="realm://token@host:port/id" />
                 </Form.Item>
                 <Form.Item label="STUN Servers" name={[fieldName, 'settings', 'stunServers']}>
-                  <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',']} placeholder="host:port" />
+                  <Select
+                    mode="tags"
+                    style={{ width: '100%' }}
+                    tokenSeparators={[',']}
+                    placeholder="host:port"
+                  />
                 </Form.Item>
-                <Divider plain style={{ margin: '8px 0' }}>TLS (optional)</Divider>
-                <Form.Item label="Server Name" name={[fieldName, 'settings', 'tlsConfig', 'serverName']}>
+                <Form.Item label="IP Mode" name={[fieldName, 'settings', 'ipMode']}>
+                  <Select
+                    allowClear
+                    placeholder="dual"
+                    options={[
+                      { value: 'dual', label: 'Dual' },
+                      { value: 'v4', label: 'IPv4' },
+                      { value: 'v6', label: 'IPv6' },
+                    ]}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="Port Mapping (UPnP / NAT-PMP)"
+                  name={[fieldName, 'settings', 'portMapping', 'enabled']}
+                  valuePropName="checked"
+                >
+                  <Switch />
+                </Form.Item>
+                <Form.Item
+                  label="Mapping Timeout (s)"
+                  name={[fieldName, 'settings', 'portMapping', 'timeout']}
+                >
+                  <InputNumber min={0} placeholder="10 = default" />
+                </Form.Item>
+                <Form.Item
+                  label="Mapping Lifetime (s)"
+                  name={[fieldName, 'settings', 'portMapping', 'lifetime']}
+                >
+                  <InputNumber min={0} placeholder="600 = default" />
+                </Form.Item>
+                <Divider plain style={{ margin: '8px 0' }}>
+                  TLS (optional)
+                </Divider>
+                <Form.Item
+                  label="Server Name"
+                  name={[fieldName, 'settings', 'tlsConfig', 'serverName']}
+                >
                   <Input placeholder="SNI for the realm server (leave empty to skip TLS)" />
                 </Form.Item>
                 <Form.Item label="ALPN" name={[fieldName, 'settings', 'tlsConfig', 'alpn']}>
@@ -881,12 +1119,11 @@ function UdpMaskItem({
                     ]}
                   />
                 </Form.Item>
-                <Form.Item label="Fingerprint" name={[fieldName, 'settings', 'tlsConfig', 'fingerprint']}>
-                  <Select
-                    allowClear
-                    style={{ width: '100%' }}
-                    options={UTLS_FINGERPRINT_OPTIONS}
-                  />
+                <Form.Item
+                  label="Fingerprint"
+                  name={[fieldName, 'settings', 'tlsConfig', 'fingerprint']}
+                >
+                  <Select allowClear style={{ width: '100%' }} options={UTLS_FINGERPRINT_OPTIONS} />
                 </Form.Item>
                 <Form.Item
                   label="Allow Insecure"
@@ -907,6 +1144,7 @@ function UdpMaskItem({
               />
             );
           }
+          if (type === 'sudoku') return <SudokuSettings fieldName={fieldName} />;
           if (type === 'noise') {
             return (
               <NoiseItems
@@ -924,7 +1162,9 @@ function UdpMaskItem({
 }
 
 function SalamanderUdpMaskSettings({
-  fieldName, form, absolutePath,
+  fieldName,
+  form,
+  absolutePath,
 }: {
   fieldName: number;
   form: FormInstance;
@@ -939,9 +1179,11 @@ function SalamanderUdpMaskSettings({
     <>
       <Form.Item
         label="Mode"
-        extra={mode === 'gecko'
-          ? 'Salamander plus Gecko: splits each packet into random-padded fragments sized within the range below, defeating packet-length fingerprinting. Stored as Salamander with packetSize.'
-          : 'Scrambles each packet into random-looking bytes.'}
+        extra={
+          mode === 'gecko'
+            ? 'Salamander plus Gecko: splits each packet into random-padded fragments sized within the range below, defeating packet-length fingerprinting. Stored as Salamander with packetSize.'
+            : 'Scrambles each packet into random-looking bytes.'
+        }
       >
         <Select
           value={mode}
@@ -952,7 +1194,10 @@ function SalamanderUdpMaskSettings({
                 packetSizePath,
                 parseGeckoPacketSize(current)
                   ? current
-                  : formatGeckoPacketSize(DEFAULT_GECKO_PACKET_SIZE.min, DEFAULT_GECKO_PACKET_SIZE.max),
+                  : formatGeckoPacketSize(
+                      DEFAULT_GECKO_PACKET_SIZE.min,
+                      DEFAULT_GECKO_PACKET_SIZE.max,
+                    ),
               );
             } else {
               form.setFieldValue(packetSizePath, undefined);
@@ -967,16 +1212,22 @@ function SalamanderUdpMaskSettings({
 
       <Form.Item label="Password">
         <Space.Compact block>
-          <Form.Item name={[fieldName, 'settings', 'password']} noStyle>
+          <Form.Item
+            name={[fieldName, 'settings', 'password']}
+            noStyle
+            rules={[{ validator: validateSalamanderPassword }]}
+          >
             <Input placeholder="Obfuscation password" style={{ width: 'calc(100% - 32px)' }} />
           </Form.Item>
           <Button
             icon={<ReloadOutlined />}
             aria-label={t('regenerate')}
-            onClick={() => form.setFieldValue(
-              [...absolutePath, 'settings', 'password'],
-              RandomUtil.randomLowerAndNum(16),
-            )}
+            onClick={() =>
+              form.setFieldValue(
+                [...absolutePath, 'settings', 'password'],
+                RandomUtil.randomLowerAndNum(16),
+              )
+            }
           />
         </Space.Compact>
       </Form.Item>
@@ -1031,7 +1282,9 @@ function GeckoPacketSizeInput({
 }
 
 function UdpHeaderCustom({
-  udpFieldName, form, absoluteSettingsPath,
+  udpFieldName,
+  form,
+  absoluteSettingsPath,
 }: {
   udpFieldName: number;
   form: FormInstance;
@@ -1040,6 +1293,20 @@ function UdpHeaderCustom({
   const { t } = useTranslation();
   return (
     <>
+      <Form.Item
+        label="Mode"
+        name={[udpFieldName, 'settings', 'mode']}
+        tooltip="Prefix puts the header on every packet; Standalone exchanges it as separate handshake packets first"
+      >
+        <Select
+          allowClear
+          placeholder="Prefix"
+          options={[
+            { value: 'prefix', label: 'Prefix' },
+            { value: 'standalone', label: 'Standalone' },
+          ]}
+        />
+      </Form.Item>
       {(['client', 'server'] as const).map((groupKey) => (
         <Form.List key={groupKey} name={[udpFieldName, 'settings', groupKey]}>
           {(items, { add, remove }) => (
@@ -1070,6 +1337,7 @@ function UdpHeaderCustom({
                     fieldName={item.name}
                     form={form}
                     absoluteItemPath={[...absoluteSettingsPath, groupKey, item.name]}
+                    allowVariables
                     onRemove={() => remove(item.name)}
                   />
                 </div>
@@ -1082,8 +1350,191 @@ function UdpHeaderCustom({
   );
 }
 
+const XDNS_RECORD_TYPE_OPTIONS = [
+  { value: 16, label: 'TXT' },
+  { value: 1, label: 'A' },
+  { value: 28, label: 'AAAA' },
+  { value: 5, label: 'CNAME' },
+];
+
+// Every xdns key needs a registered field: the finalmask watch drops keys without one.
+// Resolvers and extraPoll are read by clients only; a server keeps them for the share link.
+function XdnsSettings({ udpFieldName }: { udpFieldName: number }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Form.List name={[udpFieldName, 'settings', 'domains']}>
+        {(domains, { add, remove }) => (
+          <>
+            <Form.Item label="Domains">
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
+                aria-label={t('add')}
+                onClick={() => add({ names: [], edns0: XDNS_LEGACY_EDNS0 })}
+              />
+            </Form.Item>
+            {domains.map((domain, di) => (
+              <div key={domain.key}>
+                <Divider style={{ margin: 0 }}>
+                  Domain {di + 1}
+                  <DeleteOutlined
+                    className="danger-icon"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={t('remove')}
+                    onClick={() => remove(domain.name)}
+                    onKeyDown={activateOnKey(() => remove(domain.name))}
+                  />
+                </Divider>
+                <Form.Item label="Names" name={[domain.name, 'names']}>
+                  <Select
+                    mode="tags"
+                    style={{ width: '100%' }}
+                    tokenSeparators={[',']}
+                    placeholder="t.example.com"
+                  />
+                </Form.Item>
+                <Form.Item label="Record Types" name={[domain.name, 'types']}>
+                  <Select
+                    mode="multiple"
+                    options={XDNS_RECORD_TYPE_OPTIONS}
+                    placeholder="TXT (client), all (server)"
+                  />
+                </Form.Item>
+                <Form.Item label="EDNS0" name={[domain.name, 'edns0']}>
+                  <InputNumber min={512} max={4096} placeholder="off" />
+                </Form.Item>
+                <Form.Item label="Length Limit" name={[domain.name, 'lenLimit']}>
+                  <InputNumber min={0} max={255} placeholder="255" />
+                </Form.Item>
+                <Form.Item label="Label Limit" name={[domain.name, 'labelLimit']}>
+                  <InputNumber min={0} max={63} placeholder="63" />
+                </Form.Item>
+              </div>
+            ))}
+          </>
+        )}
+      </Form.List>
+      <Form.List name={[udpFieldName, 'settings', 'resolvers']}>
+        {(resolvers, { add, remove }) => (
+          <>
+            <Form.Item label="Resolvers (client)">
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
+                aria-label={t('add')}
+                onClick={() => add({ addrs: [] })}
+              />
+            </Form.Item>
+            {resolvers.map((resolver, ri) => (
+              <Form.Item key={resolver.key} label={`Resolver ${ri + 1}`}>
+                <Space.Compact block>
+                  <Form.Item name={[resolver.name, 'addrs']} noStyle>
+                    <Select
+                      mode="tags"
+                      style={{ width: '100%' }}
+                      tokenSeparators={[',', ' ']}
+                      placeholder="udp://8.8.8.8:53, tcp://1.1.1.1"
+                    />
+                  </Form.Item>
+                  <Button
+                    icon={<DeleteOutlined />}
+                    aria-label={t('remove')}
+                    onClick={() => remove(resolver.name)}
+                  />
+                </Space.Compact>
+              </Form.Item>
+            ))}
+          </>
+        )}
+      </Form.List>
+      <Form.Item label="Extra Poll (client)" name={[udpFieldName, 'settings', 'extraPoll']}>
+        <InputNumber min={0} max={3} placeholder="0" />
+      </Form.Item>
+    </>
+  );
+}
+
+const UDP_HOP_MODES = [
+  { value: 'intervalRemote', label: 'Rotate server port (interval)' },
+  { value: 'perConnRemote', label: 'Random server port per connection' },
+  { value: 'intervalLocal', label: 'Rotate local port (interval)' },
+];
+
+// xray-core lowercases each comma-separated mode, so a lowercase one (from an mport
+// import) still maps onto its option here.
+function udpHopModesFromWire(value: unknown): string[] {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map((mode) => mode.trim())
+    .filter(Boolean)
+    .map(
+      (mode) =>
+        UDP_HOP_MODES.find((m) => m.value.toLowerCase() === mode.toLowerCase())?.value ?? mode,
+    );
+}
+
+function validateUdpHopInterval(_: unknown, value: unknown) {
+  if (value == null || value === '') return Promise.resolve();
+  const bounds = String(value)
+    .split('-')
+    .map((v) => Number(v.trim()));
+  const valid = bounds.length <= 2 && bounds.every((v) => Number.isInteger(v) && v >= 5);
+  return valid ? Promise.resolve() : Promise.reject(new Error('seconds ≥ 5, e.g. 30 or 5-10'));
+}
+
+// Client-only hopping (xray-core 26.9.9); every key needs a registered field because the
+// finalmask watch drops keys without one.
+function UdpHopSettings({ udpFieldName }: { udpFieldName: number }) {
+  return (
+    <>
+      <Form.Item
+        label="Mode"
+        name={[udpFieldName, 'settings', 'mode']}
+        getValueProps={(value) => ({ value: udpHopModesFromWire(value) })}
+        normalize={(value: string[]) => value.join(',')}
+        rules={[{ required: true, message: 'pick at least one mode' }]}
+      >
+        <Select mode="multiple" options={UDP_HOP_MODES} />
+      </Form.Item>
+      <Form.Item
+        label="Interval (s)"
+        name={[udpFieldName, 'settings', 'interval']}
+        rules={[{ validator: validateUdpHopInterval }]}
+      >
+        <Input placeholder="30 or 5-10" />
+      </Form.Item>
+      <Form.Item label="Remote Ports" name={[udpFieldName, 'settings', 'remotePorts']}>
+        <Input placeholder="20000-50000" />
+      </Form.Item>
+      <Form.Item label="Remote IPs" name={[udpFieldName, 'settings', 'remoteIPs']}>
+        <Select mode="tags" style={{ width: '100%' }} tokenSeparators={[',', ' ']} />
+      </Form.Item>
+    </>
+  );
+}
+
+// xray-core reads reset as an Int32Range: a plain number or a "min-max" string.
+function validateNoiseReset(_: unknown, value: unknown) {
+  if (value == null || value === '') return Promise.resolve();
+  const bounds = String(value)
+    .split('-')
+    .map((v) => Number(v.trim()));
+  const valid =
+    bounds.length <= 2 &&
+    bounds.every((v) => Number.isInteger(v) && v >= 0) &&
+    bounds[0] <= bounds[bounds.length - 1];
+  return valid ? Promise.resolve() : Promise.reject(new Error('seconds, e.g. 0 or 60-120'));
+}
+
 function NoiseItems({
-  udpFieldName, form, absoluteSettingsPath,
+  udpFieldName,
+  form,
+  absoluteSettingsPath,
 }: {
   udpFieldName: number;
   form: FormInstance;
@@ -1092,8 +1543,13 @@ function NoiseItems({
   const { t } = useTranslation();
   return (
     <>
-      <Form.Item label="Reset" name={[udpFieldName, 'settings', 'reset']}>
-        <InputNumber min={0} />
+      <Form.Item
+        label="Reset"
+        name={[udpFieldName, 'settings', 'reset']}
+        tooltip="Seconds before the noise is sent to a destination again; 0 sends it once"
+        rules={[{ validator: validateNoiseReset }]}
+      >
+        <Input placeholder="0 or 60-120" />
       </Form.Item>
       <Form.List name={[udpFieldName, 'settings', 'noise']}>
         {(items, { add, remove }) => (
@@ -1136,16 +1592,98 @@ function NoiseItems({
   );
 }
 
+// xray-core 26.6 header-custom: an item is exactly one of raw bytes, a reused variable
+// or a transform ("exactly one item kind must be set"); capture works with any of them.
+type ItemKind = 'bytes' | 'reuse' | 'transform';
+
+const ITEM_KIND_OPTIONS: { value: ItemKind; label: string }[] = [
+  { value: 'bytes', label: 'Bytes' },
+  { value: 'reuse', label: 'Reuse variable' },
+  { value: 'transform', label: 'Transform' },
+];
+
+function itemKindOf(item: unknown): ItemKind {
+  const fields = (item ?? {}) as Record<string, unknown>;
+  if (typeof fields.reuse === 'string') return 'reuse';
+  if (fields.transform != null) return 'transform';
+  return 'bytes';
+}
+
+function validateCustomVarName(_: unknown, value: unknown) {
+  if (value == null || value === '') return Promise.resolve();
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(value))
+    ? Promise.resolve()
+    : Promise.reject(new Error('letters, digits and _, not starting with a digit'));
+}
+
+// Hands the form only a parsed JSON object, so half-typed text never reaches the config.
+function TransformEditor({
+  value,
+  onChange,
+}: {
+  value?: Record<string, unknown>;
+  onChange?: (next: Record<string, unknown> | undefined) => void;
+}) {
+  const [text, setText] = useState(() => (value ? JSON.stringify(value) : ''));
+  const [invalid, setInvalid] = useState(false);
+  return (
+    <>
+      <Input.TextArea
+        value={text}
+        autoSize={{ minRows: 2, maxRows: 8 }}
+        placeholder='{"op": "concat", "args": [{"reuse": "nonce"}]}'
+        onChange={(e) => {
+          const next = e.target.value;
+          setText(next);
+          if (next.trim() === '') {
+            setInvalid(false);
+            onChange?.(undefined);
+            return;
+          }
+          try {
+            const parsed: unknown = JSON.parse(next);
+            const isObject = !!parsed && typeof parsed === 'object' && !Array.isArray(parsed);
+            setInvalid(!isObject);
+            if (isObject) onChange?.(parsed as Record<string, unknown>);
+          } catch {
+            setInvalid(true);
+          }
+        }}
+      />
+      {invalid && <Typography.Text type="danger">Must be a JSON object</Typography.Text>}
+    </>
+  );
+}
+
 function ItemEditor({
-  fieldName, form, absoluteItemPath, delayMode, onRemove: _onRemove,
+  fieldName,
+  form,
+  absoluteItemPath,
+  delayMode,
+  allowVariables = false,
+  onRemove: _onRemove,
 }: {
   fieldName: number;
   form: FormInstance;
   absoluteItemPath: (string | number)[];
   delayMode?: 'number' | 'string';
+  allowVariables?: boolean;
   onRemove?: () => void;
 }) {
   const { t } = useTranslation();
+  const [kind, setKind] = useState<ItemKind>(() =>
+    allowVariables ? itemKindOf(form.getFieldValue(absoluteItemPath)) : 'bytes',
+  );
+  const onKindChange = (next: ItemKind) => {
+    setKind(next);
+    for (const key of ['type', 'packet', 'rand', 'randRange', 'reuse', 'transform']) {
+      form.setFieldValue([...absoluteItemPath, key], undefined);
+    }
+    if (next === 'bytes') {
+      form.setFieldValue([...absoluteItemPath, 'type'], 'array');
+      form.setFieldValue([...absoluteItemPath, 'rand'], 0);
+    }
+  };
   /**
    * Switching to `array` clears the packet instead of emptying it to `[]`:
    * that branch is rand-driven, and xray-core counts even an empty array as a
@@ -1165,17 +1703,26 @@ function ItemEditor({
 
   return (
     <>
-      <Form.Item label="Type" name={[fieldName, 'type']}>
-        <Select
-          onChange={onTypeChange}
-          options={[
-            { value: 'array', label: 'Array' },
-            { value: 'str', label: 'String' },
-            { value: 'hex', label: 'Hex' },
-            { value: 'base64', label: 'Base64' },
-          ]}
-        />
-      </Form.Item>
+      {allowVariables && (
+        <Form.Item label="Kind">
+          <Select value={kind} onChange={onKindChange} options={ITEM_KIND_OPTIONS} />
+        </Form.Item>
+      )}
+      {kind === 'bytes' && (
+        <Form.Item label="Type" name={[fieldName, 'type']}>
+          <Select
+            onChange={onTypeChange}
+            options={[
+              { value: 'array', label: 'Array' },
+              { value: 'str', label: 'String' },
+              { value: 'hex', label: 'Hex' },
+              { value: 'base64', label: 'Base64' },
+              // Only the noise mask parses tag expressions (xray-core 26.9.30, #6862).
+              ...(delayMode === 'string' ? [{ value: 'exp', label: 'Expression' }] : []),
+            ]}
+          />
+        </Form.Item>
+      )}
 
       {delayMode === 'number' && (
         <Form.Item label="Delay (ms)" name={[fieldName, 'delay']}>
@@ -1188,11 +1735,39 @@ function ItemEditor({
         </Form.Item>
       )}
 
+      {kind === 'reuse' && (
+        <Form.Item
+          label="Reuse"
+          name={[fieldName, 'reuse']}
+          tooltip="Writes the bytes an earlier item captured under this name"
+          rules={[
+            { required: true, message: 'name the captured variable' },
+            { validator: validateCustomVarName },
+          ]}
+        >
+          <Input placeholder="variable name" />
+        </Form.Item>
+      )}
+      {kind === 'transform' && (
+        <Form.Item
+          label="Transform"
+          name={[fieldName, 'transform']}
+          tooltip='An expression tree, e.g. {"op": "concat", "args": [{"type": "str", "bytes": "OK "}, {"reuse": "nonce"}]}'
+          rules={[{ required: true, message: 'enter the transform expression' }]}
+        >
+          <TransformEditor />
+        </Form.Item>
+      )}
+
       <Form.Item
         noStyle
-        shouldUpdate={(prev, curr) => getDeep(prev, [...absoluteItemPath, 'type']) !== getDeep(curr, [...absoluteItemPath, 'type'])}
+        shouldUpdate={(prev, curr) =>
+          getDeep(prev, [...absoluteItemPath, 'type']) !==
+          getDeep(curr, [...absoluteItemPath, 'type'])
+        }
       >
         {({ getFieldValue }) => {
+          if (kind !== 'bytes') return null;
           const type = getFieldValue([...absoluteItemPath, 'type']) as string | undefined;
           if (type === 'array') {
             return (
@@ -1228,7 +1803,9 @@ function ItemEditor({
                   <Button
                     icon={<ReloadOutlined />}
                     aria-label={t('regenerate')}
-                    onClick={() => form.setFieldValue([...absoluteItemPath, 'packet'], RandomUtil.randomBase64())}
+                    onClick={() =>
+                      form.setFieldValue([...absoluteItemPath, 'packet'], RandomUtil.randomBase64())
+                    }
                   />
                 </Space.Compact>
               </Form.Item>
@@ -1236,18 +1813,40 @@ function ItemEditor({
           }
           return (
             <Form.Item label="Packet" name={[fieldName, 'packet']}>
-              <Input placeholder="binary data" />
+              <Input placeholder={type === 'exp' ? '<b 0d0a0d0a><t><rc 20-40>' : 'binary data'} />
             </Form.Item>
           );
         }}
       </Form.Item>
+
+      {allowVariables && (
+        <Form.Item
+          label="Capture"
+          name={[fieldName, 'capture']}
+          tooltip="Saves the bytes this item writes or reads under a name later items can reuse"
+          normalize={(v) => (v === '' ? undefined : v)}
+          rules={[{ validator: validateCustomVarName }]}
+        >
+          <Input placeholder="variable name" />
+        </Form.Item>
+      )}
     </>
   );
 }
 
-function QuicParamsForm({ base, form }: { base: (string | number)[]; form: FormInstance }) {
+function QuicParamsForm({
+  base,
+  form,
+  showUdpHop,
+}: {
+  base: (string | number)[];
+  form: FormInstance;
+  showUdpHop: boolean;
+}) {
   const congestion = Form.useWatch([...base, 'congestion'], form) as string | undefined;
-  const udpHop = Form.useWatch([...base, 'udpHop'], { form, preserve: true }) as Record<string, unknown> | undefined;
+  const udpHop = Form.useWatch([...base, 'udpHop'], { form, preserve: true }) as
+    | Record<string, unknown>
+    | undefined;
   const hasUdpHop = udpHop != null;
 
   return (
@@ -1287,25 +1886,41 @@ function QuicParamsForm({ base, form }: { base: (string | number)[]; form: FormI
           <Form.Item label="Brutal Down" name={[...base, 'brutalDown']}>
             <Input placeholder="e.g. 100 mbps" />
           </Form.Item>
+          <Form.Item
+            label="Brutal Disable Loss Comp"
+            name={[...base, 'brutalDisableLossCompensation']}
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
         </>
       )}
 
-      <Form.Item label="UDP Hop">
-        <Switch
-          checked={hasUdpHop}
-          onChange={(v) => {
-            form.setFieldValue([...base, 'udpHop'], v ? defaultUdpHop() : undefined);
-          }}
-        />
-      </Form.Item>
-      {hasUdpHop && (
+      {/* Advertised to clients (link mport, JSON-subscription udphop mask); the server
+          itself listens on its own port. */}
+      {showUdpHop && (
         <>
-          <Form.Item label="Hop Ports" name={[...base, 'udpHop', 'ports']}>
-            <Input placeholder="e.g. 20000-50000" />
+          <Form.Item
+            label="UDP Hop"
+            tooltip="Advertised to clients as a hop range; the server listens on its own port only"
+          >
+            <Switch
+              checked={hasUdpHop}
+              onChange={(v) => {
+                form.setFieldValue([...base, 'udpHop'], v ? defaultUdpHop() : undefined);
+              }}
+            />
           </Form.Item>
-          <Form.Item label="Hop Interval (s)" name={[...base, 'udpHop', 'interval']}>
-            <Input placeholder="e.g. 5-10" />
-          </Form.Item>
+          {hasUdpHop && (
+            <>
+              <Form.Item label="Hop Ports" name={[...base, 'udpHop', 'ports']}>
+                <Input placeholder="e.g. 20000-50000" />
+              </Form.Item>
+              <Form.Item label="Hop Interval (s)" name={[...base, 'udpHop', 'interval']}>
+                <Input placeholder="e.g. 5-10" />
+              </Form.Item>
+            </>
+          )}
         </>
       )}
 
@@ -1315,7 +1930,28 @@ function QuicParamsForm({ base, form }: { base: (string | number)[]; form: FormI
       <Form.Item label="Keep Alive Period (s)" name={[...base, 'keepAlivePeriod']}>
         <InputNumber min={2} max={60} />
       </Form.Item>
-      <Form.Item label="Disable Path MTU Dis" name={[...base, 'disablePathMTUDiscovery']} valuePropName="checked">
+      <Form.Item
+        label="Disable Path MTU Dis"
+        name={[...base, 'disablePathMTUDiscovery']}
+        valuePropName="checked"
+      >
+        <Switch />
+      </Form.Item>
+      <Form.Item
+        label="Disable Chrome Parrot"
+        name={[...base, 'disableChromeParrot']}
+        valuePropName="checked"
+      >
+        <Switch />
+      </Form.Item>
+      <Form.Item label="Disable GSO" name={[...base, 'disableGSO']} valuePropName="checked">
+        <Switch />
+      </Form.Item>
+      <Form.Item
+        label="Disable Stateless Reset"
+        name={[...base, 'disableStatelessReset']}
+        valuePropName="checked"
+      >
         <Switch />
       </Form.Item>
 

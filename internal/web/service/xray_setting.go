@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mhsanaei/3x-ui/v3/internal/amneziawg"
+	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/util/common"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
@@ -39,6 +41,9 @@ func (s *XraySettingService) SaveXraySetting(newXraySettings string) error {
 	if synced, err := EnsureDnsServerRouting(newXraySettings); err == nil {
 		newXraySettings = synced
 	}
+	if spelled, changed, err := database.RewriteDNSOutboundQTypeZero(newXraySettings); err == nil && changed {
+		newXraySettings = spelled
+	}
 	return s.saveSetting("xrayTemplateConfig", newXraySettings)
 }
 
@@ -47,6 +52,14 @@ func (s *XraySettingService) CheckXrayConfig(XrayTemplateConfig string) error {
 	err := json.Unmarshal([]byte(XrayTemplateConfig), xrayConfig)
 	if err != nil {
 		return common.NewError("xray template config invalid:", err)
+	}
+	for _, inbound := range xrayConfig.InboundConfigs {
+		if err := validateFinalMaskSalamander(string(inbound.StreamSettings)); err != nil {
+			return common.NewError("xray template inbound \""+inbound.Tag+"\":", err)
+		}
+		if err := validateXDriveStorage(string(inbound.StreamSettings)); err != nil {
+			return common.NewError("xray template inbound \""+inbound.Tag+"\":", err)
+		}
 	}
 	if len(xrayConfig.OutboundConfigs) > 0 {
 		var outbounds []json.RawMessage
@@ -58,6 +71,31 @@ func (s *XraySettingService) CheckXrayConfig(XrayTemplateConfig string) error {
 			coreVersion = process.GetXrayVersion()
 		}
 		for _, outbound := range outbounds {
+			// Panel pseudo-protocol: validated panel-side because the core's
+			// loader would reject it outright.
+			if amneziawg.IsAmneziaWGOutbound(outbound) {
+				var probe struct {
+					Tag string `json:"tag"`
+				}
+				if err := json.Unmarshal(outbound, &probe); err != nil {
+					return common.NewError("xray template config invalid: amneziawg outbound tag unreadable:", err)
+				}
+				if err := amneziawg.ValidateAmneziaWGOutbound(probe.Tag, outbound); err != nil {
+					return err
+				}
+				continue
+			}
+			var probe struct {
+				Tag            string          `json:"tag"`
+				StreamSettings json.RawMessage `json:"streamSettings"`
+			}
+			_ = json.Unmarshal(outbound, &probe)
+			if err := validateFinalMaskSalamander(string(probe.StreamSettings)); err != nil {
+				return common.NewError("xray template outbound \""+probe.Tag+"\":", err)
+			}
+			if err := validateXDriveStorage(string(probe.StreamSettings)); err != nil {
+				return common.NewError("xray template outbound \""+probe.Tag+"\":", err)
+			}
 			if err := xray.ValidateOutboundConfig(outbound); err != nil {
 				if shouldSkipLegacyUnencryptedOutboundRejection(coreVersion, err) {
 					continue

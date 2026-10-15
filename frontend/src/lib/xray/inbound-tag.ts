@@ -14,7 +14,14 @@ function inboundTransports(
   streamSettings: Record<string, unknown> | undefined,
   settings: Record<string, unknown> | undefined,
 ): TransportBits {
-  if (protocol === 'hysteria' || protocol === 'wireguard') return UDP;
+  if (
+    protocol === 'hysteria' ||
+    protocol === 'wireguard' ||
+    protocol === 'amneziawg' ||
+    protocol === 'tuic'
+  )
+    return UDP;
+  if (protocol === 'masque') return masqueTransports(streamSettings);
 
   let bits: TransportBits = 0;
   const network = asString(streamSettings?.network);
@@ -39,6 +46,18 @@ function inboundTransports(
   }
 
   if (bits === 0) bits = TCP;
+  return bits;
+}
+
+// MASQUE listens HTTP/2 on TCP when the ALPN offers h2, HTTP/3 on UDP when it offers
+// h3 or does not offer h2.
+function masqueTransports(streamSettings: Record<string, unknown> | undefined): TransportBits {
+  const tls = streamSettings?.tlsSettings as { alpn?: unknown } | undefined;
+  const alpn = Array.isArray(tls?.alpn) ? (tls.alpn as unknown[]) : [];
+  const h2 = alpn.includes('h2');
+  let bits: TransportBits = 0;
+  if (h2) bits |= TCP;
+  if (!h2 || alpn.includes('h3')) bits |= UDP;
   return bits;
 }
 
@@ -68,10 +87,7 @@ export interface InboundTagInput {
 export function composeInboundTag(input: InboundTagInput): string {
   const bits = inboundTransports(input.protocol, input.streamSettings, input.settings);
   return (
-    nodeTagPrefix(input.nodeId)
-    + baseInboundTag(input.port ?? 0)
-    + '-'
-    + transportTagSuffix(bits)
+    nodeTagPrefix(input.nodeId) + baseInboundTag(input.port ?? 0) + '-' + transportTagSuffix(bits)
   );
 }
 

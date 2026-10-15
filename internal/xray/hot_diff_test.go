@@ -9,6 +9,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v3/internal/util/json_util"
 
 	"github.com/op/go-logging"
+	"github.com/xtls/xray-core/proxy/shadowsocks"
 )
 
 func TestMain(m *testing.M) {
@@ -211,6 +212,29 @@ func TestComputeHotDiff_ClientOnlyChangeUsesUserOps(t *testing.T) {
 	}
 }
 
+// A MASQUE inbound carries every user's CONNECT-IP tunnel; replacing the handler to
+// add one user would drop all of them, so its client list diffs per user too.
+func TestComputeHotDiff_MasqueClientAddUsesUserOps(t *testing.T) {
+	oldCfg := makeHotConfig()
+	oldCfg.InboundConfigs[1].Protocol = "masque"
+	oldCfg.InboundConfigs[1].Settings = json_util.RawMessage(`{"clients":[{"email":"a","pass":"pw-a"}],"address":["10.14.0.1/24"]}`)
+	newCfg := makeHotConfig()
+	newCfg.InboundConfigs[1].Protocol = "masque"
+	newCfg.InboundConfigs[1].Settings = json_util.RawMessage(`{"clients":[{"email":"a","pass":"pw-a"},{"email":"b","pass":"pw-b"}],"address":["10.14.0.1/24"]}`)
+
+	diff, ok := ComputeHotDiff(oldCfg, newCfg)
+	if !ok {
+		t.Fatal("a MASQUE client-only change must be hot-appliable")
+	}
+	if len(diff.RemovedInboundTags) != 0 || len(diff.AddedInbounds) != 0 {
+		t.Fatalf("a MASQUE client add must not replace the handler, got %+v", diff)
+	}
+	if len(diff.RemovedUsers) != 0 || len(diff.AddedUsers) != 1 ||
+		diff.AddedUsers[0].Email != "b" || diff.AddedUsers[0].User["pass"] != "pw-b" {
+		t.Fatalf("expected only user b added with its pass, got added %+v removed %+v", diff.AddedUsers, diff.RemovedUsers)
+	}
+}
+
 func TestComputeHotDiff_ClientChangeFallsBackToReplace(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -219,7 +243,7 @@ func TestComputeHotDiff_ClientChangeFallsBackToReplace(t *testing.T) {
 		{
 			name: "unsupported protocol",
 			mutate: func(cfg *Config) {
-				cfg.InboundConfigs[1].Protocol = "shadowsocks"
+				cfg.InboundConfigs[1].Protocol = "http"
 			},
 		},
 		{
@@ -383,5 +407,196 @@ func TestComputeHotDiff_RealityClientOnlyChangeStaysHot(t *testing.T) {
 	}
 	if len(diff.AddedUsers) != 1 || diff.AddedUsers[0].Email != "b" {
 		t.Fatalf("expected user b added via AlterInbound, got %+v", diff.AddedUsers)
+	}
+}
+
+// TestComputeHotDiff_NewTproxyInboundNeedsRestart reproduces a real incident:
+// enabling RouteThroughXray on an AmneziaWG inbound while Xray is already
+// running adds a brand-new dokodemo-door bridge with sockopt.tproxy set.
+// Xray-core's gRPC AddInbound reports success for this but never actually
+// binds a working listener, so TPROXY-redirected peer traffic silently goes
+// nowhere until the next full restart -- confirmed directly on a real box
+// (iptables TPROXY counters incrementing, but `ss` showing nothing listening
+// on the bridge port; the listener only appeared after `systemctl restart
+// x-ui`). This must force a restart instead of a hot add.
+func TestComputeHotDiff_NewTproxyInboundNeedsRestart(t *testing.T) {
+	oldCfg := makeHotConfig()
+	newCfg := makeHotConfig()
+	newCfg.InboundConfigs = append(newCfg.InboundConfigs, InboundConfig{
+		Listen:         json_util.RawMessage(`"127.0.0.1"`),
+		Port:           63110,
+		Protocol:       "dokodemo-door",
+		Tag:            "in-443-udp",
+		Settings:       json_util.RawMessage(`{"allowedNetwork":"tcp,udp","followRedirect":true}`),
+		StreamSettings: json_util.RawMessage(`{"sockopt":{"tproxy":"tproxy"}}`),
+	})
+
+	if _, ok := ComputeHotDiff(oldCfg, newCfg); ok {
+		t.Fatal("adding a new TPROXY-sockopt inbound must force a full restart, not a gRPC hot add")
+	}
+}
+
+// TestComputeHotDiff_TproxyStreamChangeNeedsRestart mirrors the REALITY
+// stream-change test above: an existing TPROXY bridge whose port changed
+// (e.g. the AmneziaWG inbound's own id-derived egress port shifted) must not
+// be hot-swapped either, for the same reliability reason.
+func TestComputeHotDiff_TproxyStreamChangeNeedsRestart(t *testing.T) {
+	tproxyIb := InboundConfig{
+		Listen:         json_util.RawMessage(`"127.0.0.1"`),
+		Port:           63110,
+		Protocol:       "dokodemo-door",
+		Tag:            "in-443-udp",
+		Settings:       json_util.RawMessage(`{"allowedNetwork":"tcp,udp","followRedirect":true}`),
+		StreamSettings: json_util.RawMessage(`{"sockopt":{"tproxy":"tproxy"}}`),
+	}
+	oldCfg := makeHotConfig()
+	oldCfg.InboundConfigs = append(oldCfg.InboundConfigs, tproxyIb)
+	newCfg := makeHotConfig()
+	changedIb := tproxyIb
+	changedIb.Port = 63111
+	newCfg.InboundConfigs = append(newCfg.InboundConfigs, changedIb)
+
+	if _, ok := ComputeHotDiff(oldCfg, newCfg); ok {
+		t.Fatal("a TPROXY bridge's port change must force a full restart, not a gRPC hot swap")
+	}
+}
+
+// TestComputeHotDiff_SocksAccountsSettingsChangeNeedsRestart reproduces a
+// real incident: editing one client under an AmneziaWG inbound left its
+// relay's settings.json byte-different (a new account list) while Xray was
+// already running. A gRPC remove+add reported success but silently dropped
+// an account with a non-ASCII email; a full restart always produced the
+// correct account list. This must force a restart, not a hot swap.
+func TestComputeHotDiff_SocksAccountsSettingsChangeNeedsRestart(t *testing.T) {
+	relayIb := InboundConfig{
+		Listen:   json_util.RawMessage(`"127.0.0.1"`),
+		Port:     65110,
+		Protocol: "socks",
+		Tag:      "in-443-udp",
+		Settings: json_util.RawMessage(`{"auth":"password","udp":true,"accounts":[{"user":"Роутер_awg","pass":"p"}]}`),
+	}
+	oldCfg := makeHotConfig()
+	oldCfg.InboundConfigs = append(oldCfg.InboundConfigs, relayIb)
+	newCfg := makeHotConfig()
+	changedIb := relayIb
+	changedIb.Settings = json_util.RawMessage(`{"auth":"password","udp":true,"accounts":[{"user":"Роутер_awg","pass":"p"},{"user":"Майфун🛟","pass":"p"}]}`)
+	newCfg.InboundConfigs = append(newCfg.InboundConfigs, changedIb)
+
+	if _, ok := ComputeHotDiff(oldCfg, newCfg); ok {
+		t.Fatal("a password-auth SOCKS5 relay's account-list change must force a full restart, not a gRPC hot swap")
+	}
+}
+
+// TestComputeHotDiff_NewSocksAccountsInboundNeedsRestart mirrors the TPROXY
+// new-inbound test above: a brand-new AmneziaWG relay inbound must also
+// force a restart, for the same reliability reason.
+func TestComputeHotDiff_NewSocksAccountsInboundNeedsRestart(t *testing.T) {
+	oldCfg := makeHotConfig()
+	newCfg := makeHotConfig()
+	newCfg.InboundConfigs = append(newCfg.InboundConfigs, InboundConfig{
+		Listen:   json_util.RawMessage(`"127.0.0.1"`),
+		Port:     65110,
+		Protocol: "socks",
+		Tag:      "in-443-udp",
+		Settings: json_util.RawMessage(`{"auth":"password","udp":true,"accounts":[{"user":"Майфун🛟","pass":"p"}]}`),
+	})
+
+	if _, ok := ComputeHotDiff(oldCfg, newCfg); ok {
+		t.Fatal("adding a new password-auth SOCKS5 relay inbound must force a full restart, not a gRPC hot add")
+	}
+}
+
+// TestComputeHotDiff_NoauthSocksBridgeStaysHot confirms the check above is
+// scoped to password-auth accounts specifically: this fork's other SOCKS5
+// bridges (panel egress, per-node egress, mtproto egress) use "noauth" with
+// no per-account identity, have no history of this failure mode, and must
+// keep using the ordinary remove+add hot path rather than pay for an
+// unnecessary restart on every port/tag change.
+func TestComputeHotDiff_NoauthSocksBridgeStaysHot(t *testing.T) {
+	bridgeIb := InboundConfig{
+		Listen:   json_util.RawMessage(`"127.0.0.1"`),
+		Port:     62790,
+		Protocol: "socks",
+		Tag:      "panel-egress",
+		Settings: json_util.RawMessage(`{"auth":"noauth","udp":false}`),
+	}
+	oldCfg := makeHotConfig()
+	oldCfg.InboundConfigs = append(oldCfg.InboundConfigs, bridgeIb)
+	newCfg := makeHotConfig()
+	changedIb := bridgeIb
+	changedIb.Port = 62791
+	newCfg.InboundConfigs = append(newCfg.InboundConfigs, changedIb)
+
+	diff, ok := ComputeHotDiff(oldCfg, newCfg)
+	if !ok {
+		t.Fatal("a noauth SOCKS5 bridge's port change should stay hot-appliable")
+	}
+	if len(diff.RemovedInboundTags) != 1 || len(diff.AddedInbounds) != 1 {
+		t.Fatalf("expected a plain remove+add for the changed bridge, got %+v", diff)
+	}
+}
+
+// Replacing a hysteria handler closes the UDP listener its QUIC sessions share,
+// and clients get no reset: they stall until their own idle timeout expires.
+func TestComputeHotDiff_HysteriaClientOnlyChangeKeepsListener(t *testing.T) {
+	stream := json_util.RawMessage(`{"network":"hysteria","security":"tls","hysteriaSettings":{"version":2}}`)
+	oldCfg := makeHotConfig()
+	oldCfg.InboundConfigs[1].Protocol = "hysteria"
+	oldCfg.InboundConfigs[1].StreamSettings = stream
+	oldCfg.InboundConfigs[1].Settings = json_util.RawMessage(`{"version":2,"clients":[{"email":"a","auth":"auth-a"}]}`)
+	newCfg := makeHotConfig()
+	newCfg.InboundConfigs[1].Protocol = "hysteria"
+	newCfg.InboundConfigs[1].StreamSettings = stream
+	newCfg.InboundConfigs[1].Settings = json_util.RawMessage(`{"version":2,"clients":[{"email":"a","auth":"auth-a"},{"email":"b","auth":"auth-b"}]}`)
+
+	diff, ok := ComputeHotDiff(oldCfg, newCfg)
+	if !ok {
+		t.Fatal("client-only change must be hot-appliable")
+	}
+	if len(diff.RemovedInboundTags) != 0 || len(diff.AddedInbounds) != 0 {
+		t.Fatalf("hysteria client-only change must not replace the handler, got removed=%v added=%d", diff.RemovedInboundTags, len(diff.AddedInbounds))
+	}
+	if len(diff.RemovedUsers) != 0 || len(diff.AddedUsers) != 1 || diff.AddedUsers[0].Email != "b" || diff.AddedUsers[0].Protocol != "hysteria" {
+		t.Fatalf("expected a single AddUser op for b, got %+v", diff)
+	}
+}
+
+// 2022 clients carry no method of their own, so a user op built from the client
+// object alone has no cipher and its account cannot be built for the core.
+func TestInboundUserOps_ShadowsocksAddedUserBuildsTheInboundAccount(t *testing.T) {
+	cases := []struct {
+		name, settingsHead, clientMethod string
+		wantLegacy                       bool
+	}{
+		{"legacy aead", `"method":"aes-256-gcm"`, `"method":"aes-256-gcm",`, true},
+		{"2022", `"method":"2022-blake3-aes-128-gcm","password":"AAECAwQFBgcICQoLDA0ODw=="`, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inbound := func(clients ...string) *InboundConfig {
+				return &InboundConfig{
+					Port: 8388, Protocol: "shadowsocks", Tag: "inbound-8388",
+					Listen:   json_util.RawMessage(`"0.0.0.0"`),
+					Settings: json_util.RawMessage(`{` + tc.settingsHead + `,"network":"tcp,udp","clients":[` + strings.Join(clients, ",") + `]}`),
+				}
+			}
+			clientA := `{` + tc.clientMethod + `"email":"a","password":"EBESExQVFhcYGRobHB0eHw=="}`
+			clientB := `{` + tc.clientMethod + `"email":"b","password":"ICEiIyQlJicoKSorLC0uLw=="}`
+
+			diff, ok := InboundUserOps(inbound(clientA), inbound(clientA, clientB))
+			if !ok {
+				t.Fatal("a client-only shadowsocks change must apply through per-user ops")
+			}
+			if len(diff.RemovedUsers) != 0 || len(diff.AddedUsers) != 1 || diff.AddedUsers[0].Email != "b" {
+				t.Fatalf("expected only user b added, got added %+v removed %+v", diff.AddedUsers, diff.RemovedUsers)
+			}
+			_, legacy, modern := decodeSSAccount(t, diff.AddedUsers[0].User)
+			if tc.wantLegacy && (legacy == nil || legacy.CipherType != shadowsocks.CipherType_AES_256_GCM) {
+				t.Fatalf("want a legacy aes-256-gcm account, got legacy %v modern %v", legacy, modern)
+			}
+			if !tc.wantLegacy && (modern == nil || modern.Key != "ICEiIyQlJicoKSorLC0uLw==") {
+				t.Fatalf("want a 2022 account keyed by b's password, got legacy %v modern %v", legacy, modern)
+			}
+		})
 	}
 }

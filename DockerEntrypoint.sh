@@ -78,5 +78,22 @@ if [ -f /root/.acme.sh/acme.sh ]; then
     crond
 fi
 
+# Explicit bootstrap on fresh volumes; existing SQLite installations stay intact.
+DB_FOLDER="${XUI_DB_FOLDER:-/etc/x-ui}"
+mkdir -p "$DB_FOLDER"
+if [ "${XUI_DB_TYPE:-sqlite}" = postgres ] || [ ! -e "$DB_FOLDER/x-ui.db" ] || [ -f "$DB_FOLDER/.preset-pending" ]; then
+    (umask 077; touch "$DB_FOLDER/.preset-pending")
+    set -- -ifEmpty
+    [ -z "${XUI_PRESET_REALITY_SERVER_NAME:-}" ] || set -- "$@" -realityServerName "$XUI_PRESET_REALITY_SERVER_NAME"
+    [ -z "${XUI_PRESET_PUBLIC_ADDRESS:-}" ] || set -- "$@" -publicAddress "$XUI_PRESET_PUBLIC_ADDRESS"
+    [ -z "${XUI_PRESET_DIRECT_PORT:-}" ] || set -- "$@" -directPort "$XUI_PRESET_DIRECT_PORT"
+    [ -z "${XUI_PRESET_RESIDENTIAL_PORT:-}" ] || set -- "$@" -residentialPort "$XUI_PRESET_RESIDENTIAL_PORT"
+    if ! (umask 077; /app/x-ui preset "$@" > "$DB_FOLDER/preset-result.json.tmp"); then
+        echo "Preset initialization failed. Check REALITY target connectivity and retry." >&2
+        exit 1
+    fi
+    mv "$DB_FOLDER/preset-result.json.tmp" "$DB_FOLDER/preset-result.json"
+    rm -f "$DB_FOLDER/.preset-pending"
+fi
 # Run x-ui
 exec /app/x-ui

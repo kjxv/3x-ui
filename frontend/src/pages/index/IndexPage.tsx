@@ -11,12 +11,18 @@ import {
 } from '@ant-design/icons';
 
 import { HttpUtil, CPUFormatter, SizeFormatter, ClipboardManager, FileManager } from '@/utils';
-import { USAGE_CRIT_COLOR, USAGE_CRIT_PERCENT, USAGE_WARN_COLOR, USAGE_WARN_PERCENT } from '@/models/status';
+import {
+  USAGE_CRIT_COLOR,
+  USAGE_CRIT_PERCENT,
+  USAGE_WARN_COLOR,
+  USAGE_WARN_PERCENT,
+} from '@/models/status';
 import { useTheme } from '@/hooks/useTheme';
 import { useStatusQuery } from '@/api/queries/useStatusQuery';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import AppSidebar from '@/layouts/AppSidebar';
 import { LazyMount } from '@/components/utility';
+import SponsorSlot from '@/components/sponsor/SponsorSlot';
 import { setMessageInstance } from '@/utils/messageBus';
 import OverviewActionBar from './OverviewActionBar';
 import VitalTile from './VitalTile';
@@ -32,6 +38,7 @@ const BackupModal = lazy(() => import('./BackupModal'));
 const SystemHistoryModal = lazy(() => import('./SystemHistoryModal'));
 const XrayMetricsModal = lazy(() => import('./XrayMetricsModal'));
 const XrayLogModal = lazy(() => import('./XrayLogModal'));
+const AmneziaWGLogModal = lazy(() => import('./AmneziaWGLogModal'));
 const VersionModal = lazy(() => import('./VersionModal'));
 import './IndexPage.css';
 
@@ -41,7 +48,9 @@ export default function IndexPage() {
   const { status, fetched, fetchError, refresh } = useStatusQuery();
   const { isMobile } = useMediaQuery();
   const [messageApi, messageContextHolder] = message.useMessage();
-  useEffect(() => { setMessageInstance(messageApi); }, [messageApi]);
+  useEffect(() => {
+    setMessageInstance(messageApi);
+  }, [messageApi]);
 
   const [accessLogEnable, setAccessLogEnable] = useState(false);
   const [devChannelEnable, setDevChannelEnable] = useState(false);
@@ -60,6 +69,7 @@ export default function IndexPage() {
   const [sysHistoryOpen, setSysHistoryOpen] = useState(false);
   const [xrayMetricsOpen, setXrayMetricsOpen] = useState(false);
   const [xrayLogsOpen, setXrayLogsOpen] = useState(false);
+  const [amneziawgLogsOpen, setAmneziawgLogsOpen] = useState(false);
   const [versionOpen, setVersionOpen] = useState(false);
   const [configTextOpen, setConfigTextOpen] = useState(false);
   const [configText, setConfigText] = useState('');
@@ -87,13 +97,10 @@ export default function IndexPage() {
     [panelUpdateInfo.currentVersion],
   );
 
-  const setBusy = useCallback(
-    ({ busy, tip }: { busy: boolean; tip?: string }) => {
-      setLoading(busy);
-      if (tip) setLoadingTip(tip);
-    },
-    [],
-  );
+  const setBusy = useCallback(({ busy, tip }: { busy: boolean; tip?: string }) => {
+    setLoading(busy);
+    if (tip) setLoadingTip(tip);
+  }, []);
 
   const stopXray = useCallback(async () => {
     await HttpUtil.post('/panel/api/server/stopXrayService');
@@ -127,7 +134,7 @@ export default function IndexPage() {
 
   async function copyConfig() {
     const ok = await ClipboardManager.copyText(configText || '');
-    if (ok) messageApi.success('Copied');
+    if (ok) messageApi.success(t('copied'));
   }
 
   function downloadConfig() {
@@ -147,9 +154,14 @@ export default function IndexPage() {
     ];
     const list = (xs: typeof items) => xs.map((i) => `${i.name} ${i.value.toFixed(0)}%`).join(', ');
     const crit = items.filter((i) => i.value >= USAGE_CRIT_PERCENT);
-    if (crit.length) return { text: t('pages.index.healthCritical', { list: list(crit) }), color: USAGE_CRIT_COLOR };
+    if (crit.length)
+      return {
+        text: t('pages.index.healthCritical', { list: list(crit) }),
+        color: USAGE_CRIT_COLOR,
+      };
     const warm = items.filter((i) => i.value >= USAGE_WARN_PERCENT);
-    if (warm.length) return { text: t('pages.index.healthWarm', { list: list(warm) }), color: USAGE_WARN_COLOR };
+    if (warm.length)
+      return { text: t('pages.index.healthWarm', { list: list(warm) }), color: USAGE_WARN_COLOR };
     return null;
   }, [status, t]);
 
@@ -174,7 +186,11 @@ export default function IndexPage() {
                   status="error"
                   title={t('somethingWentWrong')}
                   subTitle={fetchError}
-                  extra={<Button type="primary" onClick={refresh}>{t('refresh')}</Button>}
+                  extra={
+                    <Button type="primary" onClick={refresh}>
+                      {t('refresh')}
+                    </Button>
+                  }
                 />
               ) : (
                 <div className="ov-page">
@@ -189,6 +205,7 @@ export default function IndexPage() {
                     onRestartXray={restartXray}
                     onOpenLogs={() => setLogsOpen(true)}
                     onOpenXrayLogs={() => setXrayLogsOpen(true)}
+                    onOpenAmneziaWGLogs={() => setAmneziawgLogsOpen(true)}
                     onOpenConfig={openConfig}
                     onOpenBackup={() => setBackupOpen(true)}
                     onOpenSystemHistory={() => setSysHistoryOpen(true)}
@@ -196,6 +213,8 @@ export default function IndexPage() {
                     onOpenPanelUpdate={() => setPanelUpdateOpen(true)}
                     onOpenVersionSwitch={() => setVersionOpen(true)}
                   />
+
+                  <SponsorSlot slot="dashboard" />
 
                   {health && (
                     <div className="ov-health" style={{ color: health.color }}>
@@ -315,6 +334,9 @@ export default function IndexPage() {
         <LazyMount when={xrayLogsOpen}>
           <XrayLogModal open={xrayLogsOpen} onClose={() => setXrayLogsOpen(false)} />
         </LazyMount>
+        <LazyMount when={amneziawgLogsOpen}>
+          <AmneziaWGLogModal open={amneziawgLogsOpen} onClose={() => setAmneziawgLogsOpen(false)} />
+        </LazyMount>
         <LazyMount when={versionOpen}>
           <VersionModal
             open={versionOpen}
@@ -329,9 +351,7 @@ export default function IndexPage() {
             open={configTextOpen}
             title={t('pages.index.config')}
             width={isMobile ? '100%' : 900}
-            style={isMobile
-              ? { top: 20, maxWidth: 'calc(100vw - 16px)' }
-              : { top: 20 }}
+            style={isMobile ? { top: 20, maxWidth: 'calc(100vw - 16px)' } : { top: 20 }}
             onCancel={() => setConfigTextOpen(false)}
             footer={[
               <Button

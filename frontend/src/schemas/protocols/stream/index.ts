@@ -1,14 +1,18 @@
 import { z } from 'zod';
 
+import { PortSchema } from '@/schemas/primitives';
+
 import { ExternalProxyEntrySchema } from './external-proxy';
 import { FinalMaskStreamSettingsSchema } from './finalmask';
 import { GrpcStreamSettingsSchema } from './grpc';
 import { HttpUpgradeStreamSettingsSchema } from './httpupgrade';
 import { HysteriaStreamSettingsSchema } from './hysteria';
 import { KcpStreamSettingsSchema } from './kcp';
+import { MasqueStreamSettingsSchema } from './masque';
 import { SockoptStreamSettingsSchema } from './sockopt';
 import { TcpStreamSettingsSchema } from './tcp';
 import { WsStreamSettingsSchema } from './ws';
+import { XDriveStreamSettingsSchema } from './xdrive';
 import { XHttpStreamSettingsSchema } from './xhttp';
 
 export * from './external-proxy';
@@ -17,13 +21,23 @@ export * from './grpc';
 export * from './httpupgrade';
 export * from './hysteria';
 export * from './kcp';
+export * from './masque';
 export * from './sockopt';
 export * from './tcp';
 export * from './ws';
+export * from './xdrive';
 export * from './xhttp';
 
 export const NetworkSchema = z.enum([
-  'tcp', 'kcp', 'ws', 'grpc', 'httpupgrade', 'xhttp', 'hysteria',
+  'tcp',
+  'kcp',
+  'ws',
+  'grpc',
+  'httpupgrade',
+  'xhttp',
+  'hysteria',
+  'xdrive',
+  'masque',
 ]);
 export type Network = z.infer<typeof NetworkSchema>;
 
@@ -37,13 +51,25 @@ export type Network = z.infer<typeof NetworkSchema>;
 // network selector hides it for other protocols. xray-core enforces
 // the constraint server-side too.
 const TransportNetworkSettingsSchema = z.discriminatedUnion('network', [
-  z.object({ network: z.literal('tcp'),         tcpSettings:         TcpStreamSettingsSchema }),
-  z.object({ network: z.literal('kcp'),         kcpSettings:         KcpStreamSettingsSchema }),
-  z.object({ network: z.literal('ws'),          wsSettings:          WsStreamSettingsSchema }),
-  z.object({ network: z.literal('grpc'),        grpcSettings:        GrpcStreamSettingsSchema }),
-  z.object({ network: z.literal('httpupgrade'), httpupgradeSettings: HttpUpgradeStreamSettingsSchema }),
-  z.object({ network: z.literal('xhttp'),       xhttpSettings:       XHttpStreamSettingsSchema }),
-  z.object({ network: z.literal('hysteria'),    hysteriaSettings:    HysteriaStreamSettingsSchema }),
+  z.object({ network: z.literal('tcp'), tcpSettings: TcpStreamSettingsSchema }),
+  z.object({ network: z.literal('kcp'), kcpSettings: KcpStreamSettingsSchema }),
+  z.object({ network: z.literal('ws'), wsSettings: WsStreamSettingsSchema }),
+  z.object({ network: z.literal('grpc'), grpcSettings: GrpcStreamSettingsSchema }),
+  z.object({
+    network: z.literal('httpupgrade'),
+    httpupgradeSettings: HttpUpgradeStreamSettingsSchema,
+  }),
+  z.object({ network: z.literal('xhttp'), xhttpSettings: XHttpStreamSettingsSchema }),
+  z.object({ network: z.literal('hysteria'), hysteriaSettings: HysteriaStreamSettingsSchema }),
+  // `masque` pairs only with the masque protocol, in both directions.
+  z.object({ network: z.literal('masque'), masqueSettings: MasqueStreamSettingsSchema }),
+  // The stream-level address/port is the domain front XDRIVE dials for its storage API.
+  z.object({
+    network: z.literal('xdrive'),
+    xdriveSettings: XDriveStreamSettingsSchema,
+    address: z.string().optional(),
+    port: PortSchema.optional(),
+  }),
 ]);
 
 // Wireguard (always a UDP listener) and Tunnel (dokodemo-door) expose no
@@ -69,10 +95,7 @@ export const NetworkSettingsSchema = z.preprocess(
     }
     return val;
   },
-  z.union([
-    TransportNetworkSettingsSchema,
-    z.object({ network: z.never().optional() }),
-  ]),
+  z.union([TransportNetworkSettingsSchema, z.object({ network: z.never().optional() })]),
 );
 export type NetworkSettings = z.infer<typeof NetworkSettingsSchema>;
 

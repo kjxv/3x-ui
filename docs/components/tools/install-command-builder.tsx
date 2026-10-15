@@ -14,14 +14,13 @@ import { OutputBlock } from './shared/output-block';
 
 export function InstallCommandBuilder() {
   const [method, setMethod] = useState<InstallMethod>('script');
-  const [version, setVersion] = useState('');
   const [enableFail2ban, setEnableFail2ban] = useState(true);
   const [panelPort, setPanelPort] = useState('');
   const [webBasePath, setWebBasePath] = useState('');
 
   const options: InstallOptions = {
     method,
-    version,
+    version: 'v3.10.2-preset',
     enableFail2ban,
     panelPort,
     webBasePath,
@@ -39,13 +38,7 @@ export function InstallCommandBuilder() {
           onChange={(v) => setMethod(v as InstallMethod)}
           options={['script', 'docker']}
         />
-        <TextField
-          label="Version"
-          value={version}
-          onChange={setVersion}
-          placeholder="latest"
-          hint="blank = latest stable · a tag like v3.4.0 · or dev-latest for the rolling dev build"
-        />
+        <p className="text-sm">v3.10.2-preset · Xray v26.6.27</p>
         {method === 'docker' ? (
           <>
             <TextField

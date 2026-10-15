@@ -14,19 +14,36 @@ function defaultCertificate(): Record<string, unknown> {
   };
 }
 
-export function createTlsSettingsWithDefaultCert(): Record<string, unknown> {
+export function createTlsSettingsWithDefaultCert(network?: string): Record<string, unknown> {
   const tls = TlsStreamSettingsSchema.parse({}) as Record<string, unknown>;
   tls.certificates = [defaultCertificate()];
+  const settings =
+    tls.settings && typeof tls.settings === 'object' && !Array.isArray(tls.settings)
+      ? { ...(tls.settings as Record<string, unknown>) }
+      : {};
+  settings.fingerprint = 'chrome';
+  tls.settings = settings;
+  /* WebSocket bootstraps over HTTP/1.1: the schema default ALPN
+   * ['h2','http/1.1'] makes the server negotiate h2 (see issue #6782). */
+  if (network === 'ws') {
+    tls.alpn = ['http/1.1'];
+  }
   return tls;
+}
+
+// MASQUE serves HTTP/3 over QUIC by default, so it takes Hysteria's QUIC-ready TLS.
+export function createMasqueTlsSettingsWithDefaultCert(): Record<string, unknown> {
+  return createHysteriaTlsSettingsWithDefaultCert();
 }
 
 export function createHysteriaTlsSettingsWithDefaultCert(): Record<string, unknown> {
   const tls = createTlsSettingsWithDefaultCert();
   tls.alpn = ['h3'];
 
-  const settings = tls.settings && typeof tls.settings === 'object' && !Array.isArray(tls.settings)
-    ? { ...(tls.settings as Record<string, unknown>) }
-    : {};
+  const settings =
+    tls.settings && typeof tls.settings === 'object' && !Array.isArray(tls.settings)
+      ? { ...(tls.settings as Record<string, unknown>) }
+      : {};
   settings.fingerprint = '';
   tls.settings = settings;
 

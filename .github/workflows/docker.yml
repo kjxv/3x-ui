@@ -1,60 +1,23 @@
-name: Release 3X-UI for Docker
-
+name: Validate fork container on demand
+'on':
+  workflow_dispatch: {}
 permissions:
   contents: read
-  packages: write
-
-on:
-  workflow_dispatch:
-  push:
-    tags:
-      - "v*.*.*"
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    needs: []
     steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: true
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: |
-            hsanaeii/3x-ui
-            ghcr.io/mhsanaei/3x-ui
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
-
-      - name: Login to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64/v8,linux/arm/v7,linux/arm/v6,linux/386
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+    - uses: actions/checkout@v7
+    - name: Build and validate the documented fork container
+      run: |
+        docker build --build-arg TARGETARCH=amd64 -t preset-container-test .
+        docker run -d --name preset-container-test --network host -e XUI_ENABLE_FAIL2BAN=false -e XUI_PRESET_REALITY_SERVER_NAME=www.samsung.com preset-container-test
+        for i in $(seq 1 30); do
+          if docker exec preset-container-test test -f /etc/x-ui/preset-result.json; then break; fi
+          sleep 1
+        done
+        docker exec preset-container-test /app/x-ui -v | grep -Fx 3.10.2-preset
+        docker exec preset-container-test /app/bin/xray-linux-amd64 version | grep -F 'Xray 26.6.27'
+        docker exec preset-container-test test -s /etc/x-ui/preset-result.json
+        docker rm -f preset-container-test

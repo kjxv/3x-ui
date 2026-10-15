@@ -176,7 +176,12 @@ type process struct {
 	// mutex guards this map, onlineClients, and localLastOnline above so the
 	// online getters never see a torn read.
 	nodeOnlineTrees map[int]map[string][]string
-	onlineMu        sync.RWMutex
+	// nodeActiveInboundTrees mirrors nodeOnlineTrees for active inbound tags:
+	// each direct node reports a GUID-keyed subtree of inbound tags that carried
+	// traffic within its own grace window. The inbounds page combines this with
+	// nodeOnlineTrees so a multi-inbound client is not shown on an idle inbound.
+	nodeActiveInboundTrees map[int]map[string][]string
+	onlineMu               sync.RWMutex
 
 	// onlineAPISupport caches whether the running core implements the
 	// online-stats RPCs (GetUsersStats). A new process is created on every
@@ -311,6 +316,22 @@ func (p *Process) SetConfig(config *Config) {
 	p.config = config
 }
 
+// PersistConfig writes the current configuration snapshot to the config file,
+// keeping it in step after a hot apply (Start only writes it on a cold start).
+func (p *Process) PersistConfig() error {
+	p.mu.RLock()
+	data, err := json.MarshalIndent(p.config, "", "  ")
+	path := p.configPath
+	p.mu.RUnlock()
+	if err != nil {
+		return common.NewErrorf("Failed to generate XRAY configuration files: %v", err)
+	}
+	if path == "" {
+		path = GetConfigPath()
+	}
+	return writeFileAtomic(path, data, 0o600)
+}
+
 // GetOnlineClients returns the union of locally-online clients and
 // node-online clients from every registered remote panel. Dedupes by
 // email so a client connected to both a local and a node-managed inbound
@@ -398,10 +419,9 @@ func (p *Process) GetMergedNodeTrees() map[string][]string {
 }
 
 // GetLocalActiveInbounds returns a copy of THIS panel's inbound tags that
-// carried traffic within the grace window. Only the local xray reports
-// per-inbound activity; remote-node snapshots don't carry it, so the service
-// layer keys these under the panel's own GUID and a node missing from the
-// active-inbounds map means "don't gate" (fall back to the email-only signal).
+// carried traffic within the grace window. The service layer keys these under
+// the panel's own GUID before merging them with remote-node active-inbound
+// subtrees.
 func (p *Process) GetLocalActiveInbounds() []string {
 	p.onlineMu.RLock()
 	defer p.onlineMu.RUnlock()
@@ -410,6 +430,43 @@ func (p *Process) GetLocalActiveInbounds() []string {
 	}
 	out := make([]string, len(p.localActiveInbounds))
 	copy(out, p.localActiveInbounds)
+	return out
+}
+
+// GetMergedActiveInboundTrees returns the union of every direct node's reported
+// active-inbound subtree, keyed by the panelGuid of the node that physically
+// hosts each inbound. Duplicate tags reported through multiple paths are
+// deduped per GUID.
+func (p *Process) GetMergedActiveInboundTrees() map[string][]string {
+	p.onlineMu.RLock()
+	defer p.onlineMu.RUnlock()
+	if len(p.nodeActiveInboundTrees) == 0 {
+		return map[string][]string{}
+	}
+	out := make(map[string][]string)
+	seen := make(map[string]map[string]struct{})
+	for _, tree := range p.nodeActiveInboundTrees {
+		for guid, tags := range tree {
+			if guid == "" || len(tags) == 0 {
+				continue
+			}
+			dedup := seen[guid]
+			if dedup == nil {
+				dedup = make(map[string]struct{}, len(tags))
+				seen[guid] = dedup
+			}
+			for _, tag := range tags {
+				if tag == "" {
+					continue
+				}
+				if _, ok := dedup[tag]; ok {
+					continue
+				}
+				dedup[tag] = struct{}{}
+				out[guid] = append(out[guid], tag)
+			}
+		}
+	}
 	return out
 }
 
@@ -462,10 +519,29 @@ func (p *Process) RefreshLocalOnline(activeEmails, activeInboundTags []string, n
 func (p *Process) SetNodeOnlineTree(nodeID int, tree map[string][]string) {
 	p.onlineMu.Lock()
 	defer p.onlineMu.Unlock()
+	if len(tree) == 0 {
+		delete(p.nodeOnlineTrees, nodeID)
+		return
+	}
 	if p.nodeOnlineTrees == nil {
 		p.nodeOnlineTrees = map[int]map[string][]string{}
 	}
 	p.nodeOnlineTrees[nodeID] = tree
+}
+
+// SetNodeActiveInboundTree records the GUID-keyed active-inbound subtree one
+// direct remote node reported. Replaces any previous entry for that node.
+func (p *Process) SetNodeActiveInboundTree(nodeID int, tree map[string][]string) {
+	p.onlineMu.Lock()
+	defer p.onlineMu.Unlock()
+	if len(tree) == 0 {
+		delete(p.nodeActiveInboundTrees, nodeID)
+		return
+	}
+	if p.nodeActiveInboundTrees == nil {
+		p.nodeActiveInboundTrees = map[int]map[string][]string{}
+	}
+	p.nodeActiveInboundTrees[nodeID] = tree
 }
 
 // ClearNodeOnlineClients drops a direct node's whole subtree contribution.
@@ -475,6 +551,24 @@ func (p *Process) ClearNodeOnlineClients(nodeID int) {
 	p.onlineMu.Lock()
 	defer p.onlineMu.Unlock()
 	delete(p.nodeOnlineTrees, nodeID)
+	delete(p.nodeActiveInboundTrees, nodeID)
+}
+
+// RetainNodeOnlineClients drops the subtree of every direct node keep rejects: nodes
+// the master stopped syncing without a failed probe (disabled, offline, deleted).
+func (p *Process) RetainNodeOnlineClients(keep func(nodeID int) bool) {
+	p.onlineMu.Lock()
+	defer p.onlineMu.Unlock()
+	for nodeID := range p.nodeOnlineTrees {
+		if !keep(nodeID) {
+			delete(p.nodeOnlineTrees, nodeID)
+		}
+	}
+	for nodeID := range p.nodeActiveInboundTrees {
+		if !keep(nodeID) {
+			delete(p.nodeActiveInboundTrees, nodeID)
+		}
+	}
 }
 
 // GetUptime returns the uptime of the Xray process in seconds.
@@ -640,6 +734,7 @@ func (p *process) waitForCommand(cmd *exec.Cmd, done chan struct{}) {
 	defer close(done)
 
 	err := cmd.Wait()
+	p.logWriter.Flush()
 	if err == nil || p.intentionalStop.Load() {
 		return
 	}
@@ -736,17 +831,27 @@ const (
 	maxCrashReports   = 10
 )
 
-// writeCrashReport persists a captured xray crash chunk to the log folder
-// with nanosecond-precision filename so restart-loop bursts don't overwrite
-// each other, and prunes old reports to keep the folder bounded.
+// writeCrashReport persists a captured xray crash to the log folder; CreateTemp's
+// random suffix keeps restart-loop bursts within one second from overwriting each other.
 func writeCrashReport(m []byte) error {
 	dir := config.GetLogFolder()
 	if err := os.MkdirAll(dir, 0o770); err != nil {
 		return err
 	}
 	pruneOldCrashReports(dir, maxCrashReports-1)
-	name := crashReportPrefix + time.Now().Format("20060102_150405_000000000") + crashReportSuffix
-	return os.WriteFile(filepath.Join(dir, name), m, 0o640)
+	pattern := crashReportPrefix + time.Now().Format("20060102_150405") + "_*" + crashReportSuffix
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(m)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(f.Name(), 0o640)
+	}
+	return err
 }
 
 func pruneOldCrashReports(dir string, keep int) {

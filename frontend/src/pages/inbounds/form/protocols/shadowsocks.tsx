@@ -5,7 +5,7 @@ import { useFormContext } from 'react-hook-form';
 
 import { RandomUtil } from '@/utils';
 import { FormField } from '@/components/form/rhf';
-import { SSMethodSchema } from '@/schemas/protocols/shared/shadowsocks';
+import { SSInboundMethodSchema } from '@/schemas/protocols/shared/shadowsocks';
 
 interface ShadowsocksFieldsProps {
   isSSWith2022: boolean;
@@ -23,9 +23,7 @@ export default function ShadowsocksFields({ isSSWith2022 }: ShadowsocksFieldsPro
           setValue('settings.password', RandomUtil.randomShadowsocksPassword(v as string));
         }}
       >
-        <Select
-          options={SSMethodSchema.options.map((m) => ({ value: m, label: m }))}
-        />
+        <Select options={SSInboundMethodSchema.options.map((m) => ({ value: m, label: m }))} />
       </FormField>
       {isSSWith2022 && (
         <Form.Item label={t('password')}>
@@ -57,11 +55,7 @@ export default function ShadowsocksFields({ isSSWith2022 }: ShadowsocksFieldsPro
           ]}
         />
       </FormField>
-      <FormField
-        name={['settings', 'ivCheck']}
-        label="ivCheck"
-        valueProp="checked"
-      >
+      <FormField name={['settings', 'ivCheck']} label="ivCheck" valueProp="checked">
         <Switch />
       </FormField>
     </>

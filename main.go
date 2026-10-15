@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -11,11 +13,12 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
-	"time"
 	_ "unsafe"
 
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
+	"github.com/mhsanaei/3x-ui/v3/internal/crypto/nodetoken"
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/sub"
@@ -31,6 +34,43 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/op/go-logging"
 )
+
+// cliFallbackTokenName is the single token the CLI regenerates, so `-getApiToken`
+// cannot accumulate admin-equivalent credentials that are never revoked.
+const cliFallbackTokenName = "cli-fallback"
+
+// installTokenName is minted once on a panel with no tokens and is deliberately
+// not the rotated slot, so the credential the installer recorded keeps working.
+const installTokenName = "install"
+
+// initNodeTokenCrypto loads the process codec, preferring the key file over
+// the environment and failing closed when an enabled policy lacks a key.
+func initNodeTokenCrypto() error {
+	mode, err := nodetoken.ParseMode(config.GetNodeTokenEncryptionMode())
+	if err != nil {
+		return err
+	}
+	if mode == nodetoken.ModeOff {
+		c, _ := nodetoken.NewCodec(nodetoken.ModeOff, nil)
+		nodetoken.Init(c)
+		return nil
+	}
+	ring, ferr := (nodetoken.FileKeySource{Path: config.GetNodeTokenKeyFile()}).Load()
+	if ferr != nil {
+		var eerr error
+		if ring, eerr = (nodetoken.EnvKeySource{Var: config.GetNodeTokenKeyEnv()}).Load(); eerr != nil {
+			return fmt.Errorf("load node-token key: file: %w; env: %w", ferr, eerr)
+		}
+	}
+	c, err := nodetoken.NewCodec(mode, ring)
+	if err != nil {
+		return err
+	}
+	nodetoken.Init(c)
+	// The CLI runs before package logger initialization, so use log.Printf.
+	log.Printf("node-token encryption enabled (mode=%s, active-key=%s)", config.GetNodeTokenEncryptionMode(), c.ActiveKeyID())
+	return nil
+}
 
 // runWebServer initializes and starts the web server for the 3x-ui panel.
 func runWebServer() {
@@ -64,6 +104,10 @@ func runWebServer() {
 				logger.Warning("pprof server stopped: ", err)
 			}
 		}()
+	}
+
+	if err := initNodeTokenCrypto(); err != nil {
+		log.Fatalf("Error initializing node-token encryption: %v", err)
 	}
 
 	err := database.InitDB(config.GetDBPath())
@@ -165,7 +209,9 @@ func runWebServer() {
 			tgbot.StopBot()
 			// ------------------------------------------------------------
 
-			_ = server.Stop()
+			if err := server.Stop(); err != nil {
+				logger.Error("Server shutdown failed:", err)
+			}
 			_ = subServer.Stop()
 			log.Println("Shutting down servers.")
 			return
@@ -298,6 +344,26 @@ func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime stri
 		}
 		logger.Info("Successfully updated Telegram bot chat ID.")
 	}
+}
+
+// encryptNodeTokens re-encrypts stored tokens after enablement or rotation.
+// It requires migration|required mode and a configured key.
+func encryptNodeTokens() {
+	_ = godotenv.Load()
+	if err := initNodeTokenCrypto(); err != nil {
+		fmt.Println("node-token encryption init failed:", err)
+		os.Exit(1)
+	}
+	if err := database.InitDB(config.GetDBPath()); err != nil {
+		fmt.Println("database initialization failed:", err)
+		os.Exit(1)
+	}
+	changed, skipped, err := (&service.NodeService{}).MigrateNodeTokensToActiveKey()
+	if err != nil {
+		fmt.Println("token migration failed:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("node-token migration complete: %d re-encrypted, %d already current/skipped\n", changed, skipped)
 }
 
 // updateSetting updates various panel settings including port, credentials, base path, listen IP, and two-factor authentication.
@@ -436,10 +502,13 @@ func GetListenIP(getListen bool) {
 	}
 }
 
-func GetApiToken(getApiToken bool) {
+func GetApiToken(getApiToken bool, tokenName, tokenScope string) {
 	if !getApiToken {
 		return
 	}
+	// An explicit name applies to both branches below; without one each keeps
+	// the name it already used, so every existing invocation is unaffected.
+	name := strings.TrimSpace(tokenName)
 	err := database.InitDB(config.GetDBPath())
 	if err != nil {
 		fmt.Println("open database failed, error info:", err)
@@ -455,18 +524,25 @@ func GetApiToken(getApiToken bool) {
 		fmt.Printf("There are %d API token(s) configured. Existing tokens cannot be retrieved in plaintext because only hashes are stored.\n", len(tokens))
 		fmt.Println("If you have lost your token, you can manage and generate new tokens through the Panel UI (Settings -> API Tokens).")
 
-		// Create a new fallback token so the CLI is still useful without the UI
-		fallbackName := fmt.Sprintf("cli-fallback-%d", time.Now().Unix())
-		created, err := apiTokenService.Create(fallbackName)
+		// Rotate one token per name so repeated calls cannot pile up
+		// indefinitely many admin-equivalent tokens that never expire.
+		rotated := name
+		if rotated == "" {
+			rotated = cliFallbackTokenName
+		}
+		created, err := apiTokenService.RecreateByName(rotated, tokenScope)
 		if err != nil {
 			fmt.Println("Failed to create a fallback API token:", err)
 			return
 		}
-		fmt.Println("\nA new fallback token has been generated for your convenience:")
+		fmt.Printf("\nThe API token %q has been regenerated (any previous one is now invalid):\n", rotated)
 		fmt.Println("apiToken:", created.Token)
 		return
 	}
-	created, err := apiTokenService.Create("install")
+	if name == "" {
+		name = installTokenName
+	}
+	created, err := apiTokenService.Create(name, tokenScope, 0)
 	if err != nil {
 		fmt.Println("create apiToken failed, error info:", err)
 		return
@@ -548,6 +624,8 @@ func main() {
 	var show bool
 	var getCert bool
 	var getApiToken bool
+	var tokenName string
+	var tokenScope string
 	var resetTwoFactor bool
 	settingCmd.BoolVar(&reset, "reset", false, "Reset all settings")
 	settingCmd.BoolVar(&show, "show", false, "Display current settings")
@@ -559,7 +637,9 @@ func main() {
 	settingCmd.BoolVar(&resetTwoFactor, "resetTwoFactor", false, "Reset two-factor authentication settings")
 	settingCmd.BoolVar(&getListen, "getListen", false, "Display current panel listenIP IP")
 	settingCmd.BoolVar(&getCert, "getCert", false, "Display current certificate settings")
-	settingCmd.BoolVar(&getApiToken, "getApiToken", false, "Display current API token")
+	settingCmd.BoolVar(&getApiToken, "getApiToken", false, "Print an API token for CLI use, regenerating it and invalidating the previous one; on a panel with no tokens yet it mints one instead")
+	settingCmd.StringVar(&tokenName, "tokenName", "", "Name of the token -getApiToken acts on (default: "+cliFallbackTokenName+", or "+installTokenName+" on a panel with no tokens)")
+	settingCmd.StringVar(&tokenScope, "tokenScope", "", "Scope of the token -getApiToken issues: admin, monitor or node-sync (default: the scope of the token it replaces, or admin for a new one)")
 	settingCmd.StringVar(&webCertFile, "webCert", "", "Set path to public key file for panel")
 	settingCmd.StringVar(&webKeyFile, "webCertKey", "", "Set path to private key file for panel")
 	settingCmd.StringVar(&tgbottoken, "tgbottoken", "", "Set token for Telegram bot")
@@ -570,12 +650,7 @@ func main() {
 	oldUsage := flag.Usage
 	flag.Usage = func() {
 		oldUsage()
-		fmt.Println()
-		fmt.Println("Commands:")
-		fmt.Println("    run            run web panel")
-		fmt.Println("    migrate        migrate from other/old x-ui")
-		fmt.Println("    migrate-db     SQLite <-> .dump (--dump/--restore) or copy into PostgreSQL (--dsn)")
-		fmt.Println("    setting        set settings")
+		fmt.Print(commandHelp())
 	}
 
 	flag.Parse()
@@ -592,8 +667,43 @@ func main() {
 			return
 		}
 		runWebServer()
+	case "preset":
+		presetCmd := flag.NewFlagSet("preset", flag.ExitOnError)
+		skipExisting := presetCmd.Bool("ifEmpty", false, "Preserve existing non-empty panel")
+		opts := service.TutorialPresetOptions{}
+		presetCmd.StringVar(&opts.PublicAddress, "publicAddress", "", "Public IP or hostname (default: panel host)")
+		presetCmd.IntVar(&opts.DirectPort, "directPort", 0, "Direct node port (0: choose available port)")
+		presetCmd.IntVar(&opts.ResidentialPort, "residentialPort", 0, "Residential node port (0: choose available port)")
+		presetCmd.StringVar(&opts.RealityServerName, "realityServerName", "", "Non-Microsoft REALITY hostname (empty: auto-scan)")
+		if err := presetCmd.Parse(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
+		if err := database.InitDB(config.GetDBPath()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		result, err := service.ApplyTutorialPreset(opts)
+		if *skipExisting && errors.Is(err, service.ErrTutorialPresetNonEmpty) {
+			_ = database.CloseDB()
+			fmt.Println(`{"skippedExisting":true}`)
+			return
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			_ = database.CloseDB()
+			os.Exit(1)
+		}
+		encoded, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(string(encoded))
+		_ = database.CloseDB()
 	case "migrate":
 		migrateDb()
+	case "encrypt-tokens":
+		encryptNodeTokens()
 	case "migrate-db":
 		if err := migrateDbCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Println(err)
@@ -634,6 +744,11 @@ func main() {
 			fmt.Println(err)
 			return
 		}
+		// flag stops parsing at the first non-flag argument, so the `-getApiToken true`
+		// form drops every flag written after it. Say so instead of acting on a default.
+		if rest := settingCmd.Args(); len(rest) > 0 {
+			fmt.Printf("warning: ignored %q and any flags after it; put flags before positional arguments\n", strings.Join(rest, " "))
+		}
 		if reset {
 			if err = resetSetting(); err != nil {
 				return
@@ -656,7 +771,7 @@ func main() {
 			GetCertificate(getCert)
 		}
 		if getApiToken {
-			GetApiToken(getApiToken)
+			GetApiToken(getApiToken, tokenName, tokenScope)
 		}
 		if (tgbottoken != "") || (tgbotchatid != "") || (tgbotRuntime != "") {
 			updateTgbotSetting(tgbottoken, tgbotchatid, tgbotRuntime)
@@ -682,4 +797,15 @@ func main() {
 		fmt.Println()
 		settingCmd.Usage()
 	}
+}
+
+func commandHelp() string {
+	return `
+Commands:
+    run            run web panel
+    migrate        migrate from other/old x-ui
+    migrate-db     SQLite <-> .dump (--dump/--restore) or copy into PostgreSQL (--dsn)
+    encrypt-tokens encrypt node bearer tokens with the configured active key
+    setting        set settings
+`
 }

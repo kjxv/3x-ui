@@ -28,7 +28,14 @@ export const TARGET_STRATEGY_OPTIONS = OutboundDomainStrategySchema.options.map(
 
 // canEnableMux mirrors the adapter's helper but lives here so the modal
 // can show/hide the Mux section without going through the adapter.
-export const MUX_PROTOCOLS = new Set<string>(['vmess', 'vless', 'trojan', 'shadowsocks', 'http', 'socks']);
+export const MUX_PROTOCOLS = new Set<string>([
+  'vmess',
+  'vless',
+  'trojan',
+  'shadowsocks',
+  'http',
+  'socks',
+]);
 
 export const NETWORK_OPTIONS: { value: string; label: string }[] = [
   { value: 'tcp', label: 'RAW' },
@@ -37,16 +44,27 @@ export const NETWORK_OPTIONS: { value: string; label: string }[] = [
   { value: 'grpc', label: 'gRPC' },
   { value: 'httpupgrade', label: 'HTTPUpgrade' },
   { value: 'xhttp', label: 'XHTTP' },
+  { value: 'xdrive', label: 'XDRIVE' },
 ];
 
 // The hysteria protocol is locked to its own QUIC transport: the selector
 // shows only this option when the parent protocol is hysteria.
 export const HYSTERIA_NETWORK_OPTION = { value: 'hysteria', label: 'Hysteria' };
 
+// MASQUE likewise pairs only with its own CONNECT-IP transport.
+export const MASQUE_NETWORK_OPTION = { value: 'masque', label: 'MASQUE' };
+
 // Protocols whose form schema carries a flat connect target — these all
 // get the shared "server" sub-block (address + port) at the top of the
 // protocol section. Wireguard has an address but no port. DNS/freedom/
 // blackhole/loopback have no connect target.
 export const SERVER_PROTOCOLS = new Set<string>([
-  'vmess', 'vless', 'trojan', 'shadowsocks', 'socks', 'http', 'hysteria',
+  'vmess',
+  'vless',
+  'trojan',
+  'shadowsocks',
+  'socks',
+  'http',
+  'hysteria',
+  'masque',
 ]);

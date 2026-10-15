@@ -1,5 +1,8 @@
 services:
   3xui:
+    image: ghcr.io/kjxv/3x-ui:v3.10.2-preset
+    pull_policy: build
+    network_mode: host
     build:
       context: .
       dockerfile: ./Dockerfile
@@ -12,6 +15,10 @@ services:
     # with iptables, which needs NET_ADMIN. Without these caps a ban is logged
     # and shown in fail2ban status but never actually applied. NET_RAW covers
     # ip6tables. If you disable Fail2ban, you can drop cap_add.
+    #
+    # AmneziaWG works in this image: it runs embedded in the panel process
+    # (amneziawg-go over a gVisor userspace netstack), so it needs no kernel
+    # module and no host tooling. Publish its UDP listen port to use it.
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -39,15 +46,14 @@ services:
       #   docker compose --profile postgres up -d
       # and uncomment the two lines below.
       # XUI_DB_TYPE: "postgres"
-      # XUI_DB_DSN: "postgres://xui:xui@postgres:5432/xui?sslmode=disable"
+      # XUI_DB_DSN: "postgres://xui:xui@127.0.0.1:5432/xui?sslmode=disable"
     tty: true
-    ports:
-      # When XUI_PORT is set, publish the same container port (for example "8080:8080").
-      - "2053:2053"
     restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
+    ports:
+      - "127.0.0.1:5432:5432"
     container_name: 3xui_postgres
     profiles: ["postgres"]
     environment:

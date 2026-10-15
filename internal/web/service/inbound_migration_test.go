@@ -1,11 +1,15 @@
 package service
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"gorm.io/gorm"
+
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
+	"github.com/mhsanaei/3x-ui/v3/internal/database/dbtest"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/xray"
 )
@@ -19,10 +23,7 @@ import (
 func TestMigrationRequirements_BackfillsClientTrafficsWithMultiDomainInbound(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
-	if err := database.InitDB(filepath.Join(dbDir, "x-ui.db")); err != nil {
-		t.Fatalf("InitDB: %v", err)
-	}
-	t.Cleanup(func() { _ = database.CloseDB() })
+	dbtest.InitDB(t, filepath.Join(dbDir, "x-ui.db"))
 
 	db := database.GetDB()
 
@@ -90,6 +91,38 @@ func TestMigrationRequirements_BackfillsClientTrafficsWithMultiDomainInbound(t *
 	}
 }
 
+func TestMigrationRequirementsReturnsAddClientStatFailure(t *testing.T) {
+	dbDir := t.TempDir()
+	t.Setenv("XUI_DB_FOLDER", dbDir)
+	dbtest.InitDB(t, filepath.Join(dbDir, "x-ui.db"))
+	db := database.GetDB()
+	first := &model.Inbound{UserId: 1, Tag: "first", Port: 31001, Protocol: model.VLESS, Settings: `{"clients":[{"email":"first@example.test","id":"id-1"}]}`, StreamSettings: `{}`}
+	if err := db.Create(first).Error; err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+	const injected = "injected AddClientStat failure"
+	failSave := func(tx *gorm.DB) {
+		tx.AddError(errors.New(injected))
+	}
+	if err := db.Callback().Update().Before("gorm:update").Register("test:fail-migration-inbound-save", failSave); err != nil {
+		t.Fatalf("register update callback: %v", err)
+	}
+	if err := db.Callback().Create().Before("gorm:create").Register("test:fail-migration-inbound-save", failSave); err != nil {
+		t.Fatalf("register create callback: %v", err)
+	}
+	err := (&InboundService{}).MigrationRequirements()
+	if err == nil || err.Error() != injected {
+		t.Fatalf("MigrationRequirements error = %v, want %q", err, injected)
+	}
+	var count int64
+	if err := db.Model(&xray.ClientTraffic{}).Where("email = ?", "first@example.test").Count(&count).Error; err != nil {
+		t.Fatalf("count rolled-back traffic: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("earlier traffic write committed after save failure: count=%d", count)
+	}
+}
+
 // TestMigrationRequirements_CleansLegacyZeroAddrTag guards the legacy tag cleanup that
 // strips the auto-generated "0.0.0.0:" prefix. The inbound is MultiDomain TLS so the
 // externalProxy detection query returns rows and the cleanup is reached (it early-returns
@@ -98,17 +131,14 @@ func TestMigrationRequirements_BackfillsClientTrafficsWithMultiDomainInbound(t *
 func TestMigrationRequirements_CleansLegacyZeroAddrTag(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
-	if err := database.InitDB(filepath.Join(dbDir, "x-ui.db")); err != nil {
-		t.Fatalf("InitDB: %v", err)
-	}
-	t.Cleanup(func() { _ = database.CloseDB() })
+	dbtest.InitDB(t, filepath.Join(dbDir, "x-ui.db"))
 
 	db := database.GetDB()
 	legacy := &model.Inbound{
 		UserId:         1,
-		Tag:            "inbound-0.0.0.0:30002",
+		Tag:            "inbound-0.0.0.0:30003",
 		Enable:         true,
-		Port:           30002,
+		Port:           30003,
 		Protocol:       model.VLESS,
 		Settings:       `{"clients":[]}`,
 		StreamSettings: `{"security":"tls","tlsSettings":{"settings":{"domains":[{"domain":"example.com"}]}}}`,
@@ -124,8 +154,60 @@ func TestMigrationRequirements_CleansLegacyZeroAddrTag(t *testing.T) {
 	if err := db.First(&got, legacy.Id).Error; err != nil {
 		t.Fatalf("reload inbound: %v", err)
 	}
-	if got.Tag != "inbound-30002" {
-		t.Fatalf("legacy 0.0.0.0: tag not stripped: got %q, want %q", got.Tag, "inbound-30002")
+	if got.Tag != "inbound-30003" {
+		t.Fatalf("legacy 0.0.0.0: tag not stripped: got %q, want %q", got.Tag, "inbound-30003")
+	}
+}
+
+func TestMigrationRequirements_SkipsLegacyZeroAddrTagCollision(t *testing.T) {
+	setupConflictDB(t)
+	db := database.GetDB()
+
+	existing := &model.Inbound{
+		UserId:         1,
+		Tag:            "inbound-30004",
+		Enable:         true,
+		Port:           30004,
+		Protocol:       model.VLESS,
+		Settings:       `{"clients":[]}`,
+		StreamSettings: `{"network":"tcp","security":"none"}`,
+	}
+	legacy := &model.Inbound{
+		UserId:         1,
+		Tag:            "inbound-0.0.0.0:30004",
+		Enable:         true,
+		Port:           30005,
+		Protocol:       model.VLESS,
+		Settings:       `{"clients":[]}`,
+		StreamSettings: `{"security":"tls","tlsSettings":{"settings":{"domains":[{"domain":"example.com"}]}}}`,
+	}
+	if err := db.Create(existing).Error; err != nil {
+		t.Fatalf("create existing inbound: %v", err)
+	}
+	if err := db.Create(legacy).Error; err != nil {
+		t.Fatalf("create legacy inbound: %v", err)
+	}
+
+	svc := InboundService{}
+	// The cleanup shares a transaction with every other requirement, so a unique
+	// violation here rolls all of them back and only reaches the log.
+	if err := svc.MigrationRequirements(); err != nil {
+		t.Fatalf("MigrationRequirements: %v", err)
+	}
+
+	var got model.Inbound
+	if err := db.First(&got, legacy.Id).Error; err != nil {
+		t.Fatalf("reload legacy inbound: %v", err)
+	}
+	if got.Tag != "inbound-0.0.0.0:30004" {
+		t.Fatalf("colliding legacy tag should be left unchanged, got %q", got.Tag)
+	}
+	var count int64
+	if err := db.Model(&model.Inbound{}).Where("tag = ?", "inbound-30004").Count(&count).Error; err != nil {
+		t.Fatalf("count existing tag: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("target tag count = %d, want 1", count)
 	}
 }
 

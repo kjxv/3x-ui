@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Input, Select } from 'antd';
+import { Input, Select, Switch } from 'antd';
 
 import { FormField } from '@/components/form/rhf';
 
@@ -9,32 +9,20 @@ export default function TlsForm() {
   const { t } = useTranslation();
   return (
     <>
-      <FormField
-        label="SNI"
-        name={['streamSettings', 'tlsSettings', 'serverName']}
-      >
+      <FormField label="SNI" name={['streamSettings', 'tlsSettings', 'serverName']}>
         <Input placeholder={t('pages.xray.outboundForm.serverNamePlaceholder')} />
       </FormField>
-      <FormField
-        label="uTLS"
-        name={['streamSettings', 'tlsSettings', 'fingerprint']}
-      >
+      <FormField label="uTLS" name={['streamSettings', 'tlsSettings', 'fingerprint']}>
         <Select
           allowClear
           placeholder={t('none')}
           options={[{ value: '', label: t('none') }, ...UTLS_OPTIONS]}
         />
       </FormField>
-      <FormField
-        label="ALPN"
-        name={['streamSettings', 'tlsSettings', 'alpn']}
-      >
+      <FormField label="ALPN" name={['streamSettings', 'tlsSettings', 'alpn']}>
         <Select mode="multiple" options={ALPN_OPTIONS} />
       </FormField>
-      <FormField
-        label="ECH"
-        name={['streamSettings', 'tlsSettings', 'echConfigList']}
-      >
+      <FormField label="ECH" name={['streamSettings', 'tlsSettings', 'echConfigList']}>
         <Input />
       </FormField>
       <FormField
@@ -48,6 +36,13 @@ export default function TlsForm() {
         name={['streamSettings', 'tlsSettings', 'pinnedPeerCertSha256']}
       >
         <Input placeholder="base64 SHA256" />
+      </FormField>
+      <FormField
+        label={t('pages.xray.outboundForm.useSystemCA')}
+        name={['streamSettings', 'tlsSettings', 'useSystemCA']}
+        valueProp="checked"
+      >
+        <Switch />
       </FormField>
     </>
   );
