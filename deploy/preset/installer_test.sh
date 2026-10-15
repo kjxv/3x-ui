@@ -8,6 +8,7 @@ docker run --rm -v "$root:/source:ro" -v "$assets:/assets:ro" \
     -e XUI_PRESET_REALITY_SERVER_NAME=www.samsung.com -e XUI_NONINTERACTIVE=1 -e XUI_SSL_MODE=none -e XUI_ENABLE_FAIL2BAN=false \
     -e XUI_PRESET_PUBLIC_ADDRESS=127.0.0.1 -e DEBIAN_FRONTEND=noninteractive \
     ubuntu:24.04 bash -euo pipefail -c '
+trap "echo Installer_fixture_failed_at_line_\$LINENO >&2" ERR
 apt-get update -qq
 apt-get install -y -qq curl tar openssl ca-certificates python3 > /dev/null
 cat > /usr/local/bin/curl <<"CURL"
@@ -29,6 +30,15 @@ if [[ " ${args[*]} " == *"%{http_code}"* && " ${args[*]} " == *"I"* ]]; then
         fi
     done
 fi
+# Local release fixtures must report HTTP 200 for GET checksum requests too.
+for arg in "${args[@]}"; do
+    if [[ "$arg" == file://* && -f "${arg#file://}" ]]; then
+        for index in "${!args[@]}"; do
+            args[$index]="${args[$index]//\%\{http_code\}/200}"
+        done
+        break
+    fi
+done
 exec /usr/bin/curl "${args[@]}"
 CURL
 chmod +x /usr/local/bin/curl

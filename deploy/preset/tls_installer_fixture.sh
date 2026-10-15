@@ -54,6 +54,15 @@ if [[ " ${args[*]} " == *"%{http_code}"* && " ${args[*]} " == *"I"* ]]; then
         fi
     done
 fi
+# Local release fixtures must report HTTP 200 for GET checksum requests too.
+for arg in "${args[@]}"; do
+    if [[ "$arg" == file://* && -f "${arg#file://}" ]]; then
+        for index in "${!args[@]}"; do
+            args[$index]="${args[$index]//\%\{http_code\}/200}"
+        done
+        break
+    fi
+done
 exec /usr/bin/curl "${args[@]}"
 CURL
 chmod +x /usr/local/bin/curl
