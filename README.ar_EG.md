@@ -8,10 +8,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MHSanaei/3x-ui/releases"><img src="https://img.shields.io/github/v/release/mhsanaei/3x-ui" alt="Release"></a>
-  <a href="https://github.com/MHSanaei/3x-ui/actions"><img src="https://img.shields.io/github/actions/workflow/status/mhsanaei/3x-ui/release.yml.svg" alt="Build"></a>
+  <a href="https://github.com/kjxv/3x-ui/releases"><img src="https://img.shields.io/github/v/release/mhsanaei/3x-ui" alt="Release"></a>
+  <a href="https://github.com/kjxv/3x-ui/actions"><img src="https://img.shields.io/github/actions/workflow/status/mhsanaei/3x-ui/release.yml.svg" alt="Build"></a>
   <a href="#"><img src="https://img.shields.io/github/go-mod/go-version/mhsanaei/3x-ui.svg" alt="GO Version"></a>
-  <a href="https://github.com/MHSanaei/3x-ui/releases/latest"><img src="https://img.shields.io/github/downloads/mhsanaei/3x-ui/total.svg" alt="Downloads"></a>
+  <a href="https://github.com/kjxv/3x-ui/releases/latest"><img src="https://img.shields.io/github/downloads/mhsanaei/3x-ui/total.svg" alt="Downloads"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0.en.html"><img src="https://img.shields.io/badge/license-GPL%20V3-blue.svg?longCache=true" alt="License"></a>
   <a href="https://pkg.go.dev/github.com/mhsanaei/3x-ui/v3"><img src="https://pkg.go.dev/badge/github.com/mhsanaei/3x-ui/v3.svg" alt="Go Reference"></a>
   <a href="https://docs.sanaei.dev"><img src="https://img.shields.io/badge/docs-docs.sanaei.dev-22d3ee" alt="Documentation"></a>
@@ -73,37 +73,16 @@
 
 ## البدء السريع
 
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
-```
-
-لتثبيت إصدار محدد، أضِف وسمه (مثل `v3.7.0`):
+Install this fork's **3X-UI 3.10.2 preset**, with **Xray v26.6.27** pinned:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.7.0
+bash <(curl -fLsS https://raw.githubusercontent.com/kjxv/3x-ui/v3.10.2-preset/deploy/preset/install.sh)
 ```
 
-لتثبيت بنية **dev** المتجددة (أحدث إصدار أولي لكل التزام (commit) من `main`، وليس إصدارًا مستقرًا)، مرّر `dev-latest`:
-
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
-```
-
-أثناء التثبيت، يتم إنشاء اسم مستخدم وكلمة مرور ومسار وصول عشوائية. بعد التثبيت، شغّل `x-ui` لفتح قائمة الإدارة، حيث يمكنك بدء/إيقاف الخدمة، وعرض أو إعادة تعيين بيانات تسجيل الدخول، وإدارة شهادات SSL، والمزيد.
-
-يُنشر مع كل ملف إصدار مجموع تحقق `.sha256` بجانبه، ويتحقق كل من `install.sh` وأداة التحديث من الأرشيف مقابل هذا المجموع ويتوقفان عند عدم التطابق.
-
-للحصول على الوثائق الكاملة — التثبيت والإعداد والتشغيل ومرجع API الكامل — قم بزيارة **[docs.sanaei.dev](https://docs.sanaei.dev)**.
-
-### التثبيت غير التفاعلي
-
-يعمل المثبِّت أيضًا **بشكل غير تفاعلي** لـ cloud-init.
-عيّن `XUI_NONINTERACTIVE=1` (أو مرّره عبر أنبوب دون TTY) وسيتولى التثبيت من البداية إلى النهاية
-دون أي مطالبات، مُنشئًا بيانات اعتماد عشوائية وكاتبًا إياها في
-`/etc/x-ui/install-result.env`. راجع [`deploy/`](deploy/) لـ:
-
-- [بيانات مستخدم cloud-init](deploy/cloud-init/) — تثبيت غير تفاعلي على أي سحابة (Hetzner/AWS/DO/Vultr/GCP/Azure/Oracle)
-- [ملاحظات Hetzner Cloud](deploy/marketplace/hetzner/) — نشر يعتمد على cloud-init على Hetzner
+The initial installation creates **自建-直连** and **自建-住宅**, two VLESS + REALITY inbounds on different random available ports, sharing one `01` client. Clash/Mihomo subscriptions are enabled.
+The server-side target scanner chooses a low-latency feasible REALITY target, excluding Microsoft domains. Both nodes set the minimum client version to `1.0.0`.
+After signing in, edit **默认** in **Xray settings → Outbounds**, enter your residential Socks5 address, port and credentials, then import the subscription.
+Existing configurations survive reinstallations. See the [preset guide](deploy/preset/README.md).
 
 ## المنصات المدعومة
 
@@ -137,6 +116,12 @@ systemctl restart x-ui
 
 ### Docker
 
+Build this fork's image locally before starting the container:
+
+```bash
+docker build -t ghcr.io/kjxv/3x-ui:v3.10.2-preset https://github.com/kjxv/3x-ui.git#codex/v3.10.2-preset
+```
+
 يستمر الأمر الافتراضي `docker compose up -d` في استخدام SQLite. للتشغيل مع خدمة PostgreSQL المرفقة، أزِل التعليق عن سطري متغيرات البيئة `XUI_DB_*` في `docker-compose.yml` وشغّل باستخدام البروفايل:
 
 ```bash
@@ -146,7 +131,7 @@ docker compose --profile postgres up -d
 تتضمن الصورة Fail2ban (مُفعَّل افتراضيًا) لفرض **حدود IP** لكل عميل. يحظر Fail2ban المخالفين باستخدام `iptables`، الذي يتطلب صلاحية `NET_ADMIN`. يمنح `docker-compose.yml` هذه الصلاحية مسبقًا عبر `cap_add`؛ إذا شغّلت الحاوية باستخدام `docker run` بدلاً من ذلك، فأضِف الصلاحيات بنفسك، وإلا فسيتم تسجيل عمليات الحظر دون تطبيقها أبدًا:
 
 ```bash
-docker run -d --cap-add=NET_ADMIN --cap-add=NET_RAW ... ghcr.io/mhsanaei/3x-ui
+docker run -d --cap-add=NET_ADMIN --cap-add=NET_RAW ... ghcr.io/kjxv/3x-ui
 ```
 
 ## متغيرات البيئة

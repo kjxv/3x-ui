@@ -8,10 +8,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/MHSanaei/3x-ui/releases"><img src="https://img.shields.io/github/v/release/mhsanaei/3x-ui" alt="Release"></a>
-  <a href="https://github.com/MHSanaei/3x-ui/actions"><img src="https://img.shields.io/github/actions/workflow/status/mhsanaei/3x-ui/release.yml.svg" alt="Build"></a>
+  <a href="https://github.com/kjxv/3x-ui/releases"><img src="https://img.shields.io/github/v/release/mhsanaei/3x-ui" alt="Release"></a>
+  <a href="https://github.com/kjxv/3x-ui/actions"><img src="https://img.shields.io/github/actions/workflow/status/mhsanaei/3x-ui/release.yml.svg" alt="Build"></a>
   <a href="#"><img src="https://img.shields.io/github/go-mod/go-version/mhsanaei/3x-ui.svg" alt="GO Version"></a>
-  <a href="https://github.com/MHSanaei/3x-ui/releases/latest"><img src="https://img.shields.io/github/downloads/mhsanaei/3x-ui/total.svg" alt="Downloads"></a>
+  <a href="https://github.com/kjxv/3x-ui/releases/latest"><img src="https://img.shields.io/github/downloads/mhsanaei/3x-ui/total.svg" alt="Downloads"></a>
   <a href="https://www.gnu.org/licenses/gpl-3.0.en.html"><img src="https://img.shields.io/badge/license-GPL%20V3-blue.svg?longCache=true" alt="License"></a>
   <a href="https://pkg.go.dev/github.com/mhsanaei/3x-ui/v3"><img src="https://pkg.go.dev/badge/github.com/mhsanaei/3x-ui/v3.svg" alt="Go Reference"></a>
   <a href="https://docs.sanaei.dev"><img src="https://img.shields.io/badge/docs-docs.sanaei.dev-22d3ee" alt="Documentation"></a>
@@ -73,37 +73,16 @@ Built as an enhanced fork of the original X-UI project, 3X-UI adds broader proto
 
 ## Quick Start
 
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
-```
-
-To install a specific version, append its tag (e.g. `v3.7.0`):
+Install this fork's **3X-UI 3.10.2 preset**, with **Xray v26.6.27** pinned:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.7.0
+bash <(curl -fLsS https://raw.githubusercontent.com/kjxv/3x-ui/v3.10.2-preset/deploy/preset/install.sh)
 ```
 
-To install the rolling **dev** build (latest per-commit pre-release from `main`, not a stable release), pass `dev-latest`:
-
-```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
-```
-
-During installation a random username, password, and access path are generated. After installation, run `x-ui` to open the management menu, where you can start/stop the service, view or reset your login credentials, manage SSL certificates, and more.
-
-Every release asset is published with a `.sha256` sum next to it. Both `install.sh` and the updater verify the archive against that sum and abort on a mismatch.
-
-For full documentation — installation, configuration, operations, and the complete API reference — visit **[docs.sanaei.dev](https://docs.sanaei.dev)**.
-
-### Unattended install
-
-The installer also runs **non-interactively** for cloud-init.
-Set `XUI_NONINTERACTIVE=1` (or pipe with no TTY) and it installs end-to-end with
-zero prompts, generating random credentials and writing them to
-`/etc/x-ui/install-result.env`. See [`deploy/`](deploy/) for:
-
-- [Cloud-init user-data](deploy/cloud-init/) — unattended install on any cloud (Hetzner/AWS/DO/Vultr/GCP/Azure/Oracle)
-- [Hetzner Cloud notes](deploy/marketplace/hetzner/) — cloud-init deployment on Hetzner
+The initial installation creates **自建-直连** and **自建-住宅**, two VLESS + REALITY inbounds on different random available ports, sharing one `01` client. Clash/Mihomo subscriptions are enabled.
+The server-side target scanner chooses a low-latency feasible REALITY target, excluding Microsoft domains. Both nodes set the minimum client version to `1.0.0`.
+After signing in, edit **默认** in **Xray settings → Outbounds**, enter your residential Socks5 address, port and credentials, then import the subscription.
+Existing configurations survive reinstallations. See the [preset guide](deploy/preset/README.md).
 
 ## Supported Platforms
 
@@ -137,6 +116,12 @@ The source SQLite file is left untouched; remove it manually once you have verif
 
 ### Docker
 
+Build this fork's image locally before starting the container:
+
+```bash
+docker build -t ghcr.io/kjxv/3x-ui:v3.10.2-preset https://github.com/kjxv/3x-ui.git#codex/v3.10.2-preset
+```
+
 The default `docker compose up -d` keeps using SQLite. To run with the bundled PostgreSQL service, uncomment the two `XUI_DB_*` env lines in `docker-compose.yml` and start with the profile:
 
 ```bash
@@ -146,7 +131,7 @@ docker compose --profile postgres up -d
 The image bundles Fail2ban (enabled by default) to enforce per-client **IP limits**. Fail2ban bans offenders with `iptables`, which requires the `NET_ADMIN` capability. `docker-compose.yml` already grants it via `cap_add`; if you start the container with `docker run` instead, add the capabilities yourself, otherwise bans are logged but never applied:
 
 ```bash
-docker run -d --cap-add=NET_ADMIN --cap-add=NET_RAW ... ghcr.io/mhsanaei/3x-ui
+docker run -d --name 3x-ui --network host --cap-add=NET_ADMIN --cap-add=NET_RAW -v "$PWD/db:/etc/x-ui" ghcr.io/kjxv/3x-ui:v3.10.2-preset
 ```
 
 ## Environment Variables

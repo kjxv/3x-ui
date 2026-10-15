@@ -287,3 +287,6 @@ func init() {
 	}
 	_ = copyFile(oldDBPath, newDBPath) // ignore error
 }
+
+// IsTutorialPreset identifies the fork's maintained default-node distribution.
+func IsTutorialPreset() bool { return strings.Contains(GetBaseVersion(), "-preset") }

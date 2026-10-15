@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -665,6 +667,39 @@ func main() {
 			return
 		}
 		runWebServer()
+	case "preset":
+		presetCmd := flag.NewFlagSet("preset", flag.ExitOnError)
+		skipExisting := presetCmd.Bool("ifEmpty", false, "Preserve existing non-empty panel")
+		opts := service.TutorialPresetOptions{}
+		presetCmd.StringVar(&opts.PublicAddress, "publicAddress", "", "Public IP or hostname (default: panel host)")
+		presetCmd.IntVar(&opts.DirectPort, "directPort", 0, "Direct node port (0: choose available port)")
+		presetCmd.IntVar(&opts.ResidentialPort, "residentialPort", 0, "Residential node port (0: choose available port)")
+		presetCmd.StringVar(&opts.RealityServerName, "realityServerName", "", "Non-Microsoft REALITY hostname (empty: auto-scan)")
+		if err := presetCmd.Parse(os.Args[2:]); err != nil {
+			os.Exit(1)
+		}
+		if err := database.InitDB(config.GetDBPath()); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		result, err := service.ApplyTutorialPreset(opts)
+		if *skipExisting && errors.Is(err, service.ErrTutorialPresetNonEmpty) {
+			_ = database.CloseDB()
+			fmt.Println(`{"skippedExisting":true}`)
+			return
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			_ = database.CloseDB()
+			os.Exit(1)
+		}
+		encoded, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(string(encoded))
+		_ = database.CloseDB()
 	case "migrate":
 		migrateDb()
 	case "encrypt-tokens":

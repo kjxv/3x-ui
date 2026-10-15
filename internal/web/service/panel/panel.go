@@ -41,7 +41,7 @@ type PanelUpdateInfo struct {
 }
 
 const (
-	panelUpdaterURL      = "https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh"
+	panelUpdaterURL      = "https://raw.githubusercontent.com/kjxv/3x-ui/v3.10.2-preset/update.sh"
 	maxPanelUpdaterBytes = 2 << 20
 	// devReleaseTag is the fixed-tag rolling pre-release the CI force-moves to the
 	// newest main commit; the dev update channel installs from it.
@@ -130,6 +130,10 @@ func (s *PanelService) RestartPanel(delay time.Duration) error {
 // is enabled on a dev build it compares commits against the rolling dev release;
 // otherwise it compares versions against the latest stable tag.
 func (s *PanelService) GetUpdateInfo() (*PanelUpdateInfo, error) {
+	if config.IsTutorialPreset() {
+		current := config.GetBaseVersion()
+		return &PanelUpdateInfo{Channel: "preset", CurrentVersion: current, LatestVersion: current, UpdateAvailable: false}, nil
+	}
 	if devChannelActive() {
 		return getDevUpdateInfo()
 	}
@@ -214,6 +218,9 @@ func (s *PanelService) GetUpdateStatus() *PanelUpdateStatus {
 }
 
 func (s *PanelService) startUpdate(useDev bool) (int64, error) {
+	if config.IsTutorialPreset() {
+		return 0, fmt.Errorf("这是固定内核的预设版，请使用对应预设版的部署命令更新")
+	}
 	runID := time.Now().UnixNano()
 	if !acquireUpdateSlot(runID) {
 		return 0, fmt.Errorf("a panel update is already in progress")
@@ -431,9 +438,9 @@ func fetchLatestPanelVersion() (string, error) {
 // fetchPanelRelease fetches a release from GitHub. An empty tag resolves the
 // latest stable release; a non-empty tag (e.g. dev-latest) resolves that tag.
 func fetchPanelRelease(tag string) (*service.Release, error) {
-	url := "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest"
+	url := "https://api.github.com/repos/kjxv/3x-ui/releases/latest"
 	if tag != "" {
-		url = "https://api.github.com/repos/MHSanaei/3x-ui/releases/tags/" + tag
+		url = "https://api.github.com/repos/kjxv/3x-ui/releases/tags/" + tag
 	}
 	client := (&service.SettingService{}).NewProxiedHTTPClient(10 * time.Second)
 	req, reqErr := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)

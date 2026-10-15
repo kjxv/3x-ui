@@ -1652,13 +1652,13 @@ _install_xui_service_unit() {
 # fails with "Failed to fetch x-ui version"), and falls back to the API.
 resolve_latest_tag() {
     local url tag
-    url=$(curl -sSLI -o /dev/null -w '%{url_effective}' --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://github.com/MHSanaei/3x-ui/releases/latest" 2>/dev/null)
+    url=$(curl -sSLI -o /dev/null -w '%{url_effective}' --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://github.com/kjxv/3x-ui/releases/latest" 2>/dev/null)
     tag=${url##*/tag/}
     if [[ "$tag" != "$url" && -n "$tag" && "$tag" != "latest" ]]; then
         echo "$tag"
         return 0
     fi
-    curl -Ls --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
+    curl -Ls --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://api.github.com/repos/kjxv/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
 }
 
 # Releases publish <asset>.sha256 next to each archive. A mismatch or a failed
@@ -1670,8 +1670,8 @@ verify_release_checksum() {
     code=$(curl -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${sums}" -w '%{http_code}' "${url}.sha256")
     if [[ "${code}" == "404" ]]; then
         rm -f "${sums}"
-        echo -e "${yellow}No checksum published for this release, skipping verification${plain}"
-        return 0
+        echo "A checksum is required for this preset release." >&2
+        exit 1
     fi
     if [[ "${code}" != "200" ]]; then
         rm -f "${sums}" "${file}"
@@ -1697,7 +1697,7 @@ require_repo_files() {
     shift
     [[ "${ref}" == "main" ]] && return 0
     for name in "$@"; do
-        status=$(curl -sIL --retry 3 --connect-timeout 15 -o /dev/null -w '%{http_code}' "https://raw.githubusercontent.com/MHSanaei/3x-ui/${ref}/${name}")
+        status=$(curl -sIL --retry 3 --connect-timeout 15 -o /dev/null -w '%{http_code}' "https://raw.githubusercontent.com/kjxv/3x-ui/${ref}/${name}")
         if [[ "${status}" != "200" ]]; then
             echo -e "${red}${name} is not available for ${ref} (HTTP ${status})${plain}"
             echo -e "${red}Install a release that ships it, or 'dev' for the rolling build. Your existing installation has not been touched.${plain}"
@@ -1707,17 +1707,21 @@ require_repo_files() {
 }
 
 install_x-ui() {
+    local preset_first_install=0
+    local preset_pending="${XUI_DB_FOLDER:-/etc/x-ui}/.preset-pending"
+    if [[ -f "$preset_pending" ]] || [[ ! -e "${xui_folder}/x-ui" && ! -e "${XUI_DB_FOLDER:-/etc/x-ui}/x-ui.db" ]]; then preset_first_install=1; fi
+    if [[ $# -gt 0 && "$1" != "v3.10.2-preset" ]]; then echo "This preset installer only installs v3.10.2-preset." >&2; exit 1; fi
     cd ${xui_folder%/x-ui}/
 
     # Download resources
     if [ $# == 0 ]; then
-        tag_version=$(resolve_latest_tag)
+        tag_version="v3.10.2-preset"
         if [[ ! -n "$tag_version" ]]; then
             echo -e "${red}Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later${plain}"
             exit 1
         fi
         echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
-        curl -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1 --speed-time 300 -o ${xui_folder}-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
+        curl -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1 --speed-time 300 -o ${xui_folder}-linux-$(arch).tar.gz https://github.com/kjxv/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
         if [[ $? -ne 0 ]]; then
             echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
             exit 1
@@ -1727,7 +1731,7 @@ install_x-ui() {
             echo -e "${red}Downloaded x-ui release archive is empty${plain}"
             exit 1
         fi
-        verify_release_checksum "https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz" "${xui_folder}-linux-$(arch).tar.gz"
+        verify_release_checksum "https://github.com/kjxv/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz" "${xui_folder}-linux-$(arch).tar.gz"
     else
         tag_version=$1
         # The rolling dev channel ships under a fixed, non-semver tag that is
@@ -1746,7 +1750,7 @@ install_x-ui() {
             fi
         fi
 
-        url="https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
+        url="https://github.com/kjxv/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
         echo -e "Beginning to install x-ui ${tag_version}"
         curl -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1 --speed-time 300 -o ${xui_folder}-linux-$(arch).tar.gz ${url}
         if [[ $? -ne 0 ]]; then
@@ -1773,7 +1777,7 @@ install_x-ui() {
     require_repo_files "${script_ref}" "${required_files[@]}"
     local xui_script_temp="/usr/bin/x-ui-temp.$$"
     rm -f "${xui_script_temp}"
-    curl -fLRo "${xui_script_temp}" "https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.sh"
+    curl -fLRo "${xui_script_temp}" "https://raw.githubusercontent.com/kjxv/3x-ui/${script_ref}/x-ui.sh"
     if [[ $? -ne 0 ]]; then
         rm -f "${xui_script_temp}"
         echo -e "${red}Failed to download x-ui.sh${plain}"
@@ -1909,7 +1913,43 @@ install_x-ui() {
     fi
     chmod +x /usr/bin/x-ui
     mkdir -p /var/log/x-ui
+    if [[ "$preset_first_install" == "1" ]]; then
+        mkdir -p "${XUI_DB_FOLDER:-/etc/x-ui}" || exit 1
+        (umask 077; printf '%s\n' "v3.10.2-preset" > "$preset_pending") || exit 1
+    fi
     config_after_install
+    # ACME installation changes the shell directory to the user's home.
+    # Restore the bundle directory before Xray reads bin/geoip.dat and before
+    # installing the service unit shipped in this same fixed release.
+    cd "$xui_folder" || { echo "Cannot enter installed x-ui directory." >&2; exit 1; }
+    if [[ "$preset_first_install" == "1" ]]; then
+        # SSL setup can have started the service. Stop it before reserving ports
+        # and writing the complete initial profile, then let the installer start it.
+        systemctl stop x-ui > /dev/null 2>&1 || rc-service x-ui stop > /dev/null 2>&1 || true
+        local preset_options=()
+        local preset_address="${XUI_PRESET_PUBLIC_ADDRESS:-${XUI_SERVER_IP:-}}"
+        [[ -z "$preset_address" ]] || preset_options+=(-publicAddress "$preset_address")
+        [[ -z "${XUI_PRESET_DIRECT_PORT:-}" ]] || preset_options+=(-directPort "$XUI_PRESET_DIRECT_PORT")
+        [[ -z "${XUI_PRESET_RESIDENTIAL_PORT:-}" ]] || preset_options+=(-residentialPort "$XUI_PRESET_RESIDENTIAL_PORT")
+        [[ -z "${XUI_PRESET_REALITY_SERVER_NAME:-}" ]] || preset_options+=(-realityServerName "$XUI_PRESET_REALITY_SERVER_NAME")
+        local preset_result="${XUI_DB_FOLDER:-/etc/x-ui}/preset-result.json"
+        local preset_result_temp="${preset_result}.tmp.$$"
+        (umask 077; "${xui_folder}/x-ui" preset "${preset_options[@]}" > "$preset_result_temp")
+        if [[ $? -ne 0 ]]; then
+            rm -f "$preset_result_temp"
+            echo "Preset initialization failed; no partial nodes or settings were saved." >&2
+            exit 1
+        fi
+        mv -f "$preset_result_temp" "$preset_result"
+        chmod 600 "$preset_result"
+        rm -f "$preset_pending"
+        echo "自建-直连、自建-住宅、住宅 Socks5 出站和 Clash 订阅已初始化。"
+        echo "登录后台后，在 Xray 设置 → 出站中修改 默认 的地址、端口及认证信息。"
+        cat "$preset_result"
+    else
+        echo "Existing installation detected: nodes, residential credentials and subscription settings were preserved."
+    fi
+
 
     # Etckeeper compatibility
     if [ -d "/etc/.git" ]; then
@@ -1928,7 +1968,7 @@ install_x-ui() {
     if [[ $release == "alpine" ]]; then
         xui_rc_temp="/etc/init.d/x-ui.tmp.$$"
         rm -f "${xui_rc_temp}"
-        curl -fLRo "${xui_rc_temp}" "https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.rc"
+        curl -fLRo "${xui_rc_temp}" "https://raw.githubusercontent.com/kjxv/3x-ui/${script_ref}/x-ui.rc"
         if [[ $? -ne 0 ]]; then
             rm -f "${xui_rc_temp}"
             echo -e "${red}Failed to download x-ui.rc${plain}"
@@ -1993,13 +2033,13 @@ install_x-ui() {
             echo -e "${yellow}Service files not found in tar.gz, downloading from GitHub...${plain}"
             case "${release}" in
                 ubuntu | debian | armbian)
-                    service_unit_url="https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.service.debian"
+                    service_unit_url="https://raw.githubusercontent.com/kjxv/3x-ui/${script_ref}/x-ui.service.debian"
                     ;;
                 arch | manjaro | parch)
-                    service_unit_url="https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.service.arch"
+                    service_unit_url="https://raw.githubusercontent.com/kjxv/3x-ui/${script_ref}/x-ui.service.arch"
                     ;;
                 *)
-                    service_unit_url="https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.service.rhel"
+                    service_unit_url="https://raw.githubusercontent.com/kjxv/3x-ui/${script_ref}/x-ui.service.rhel"
                     ;;
             esac
 

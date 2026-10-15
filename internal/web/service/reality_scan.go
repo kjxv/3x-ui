@@ -28,7 +28,6 @@ const (
 
 var defaultRealityScanCandidates = []string{
 	"www.cloudflare.com:443",
-	"www.microsoft.com:443",
 	"www.amazon.com:443",
 	"aws.amazon.com:443",
 	"www.samsung.com:443",

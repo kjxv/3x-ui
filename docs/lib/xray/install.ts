@@ -4,36 +4,29 @@ export type InstallMethod = 'script' | 'docker';
 
 export interface InstallOptions {
   method: InstallMethod;
-  /** A release tag like `v3.4.1`, or empty/`latest` for the latest release. */
+  /** Preserved for callers; this branch always uses v3.10.2-preset. */
   version: string;
   enableFail2ban: boolean;
   panelPort: string;
   webBasePath: string;
 }
 
-const REPO_RAW = 'https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh';
-const IMAGE = 'ghcr.io/mhsanaei/3x-ui:latest';
+const REPO_RAW = 'https://raw.githubusercontent.com/kjxv/3x-ui/v3.10.2-preset/deploy/preset/install.sh';
+const IMAGE = 'ghcr.io/kjxv/3x-ui:v3.10.2-preset';
+const SOURCE = 'https://github.com/kjxv/3x-ui.git#codex/v3.10.2-preset';
 
-function isLatest(version: string): boolean {
-  const v = version.trim().toLowerCase();
-  return v === '' || v === 'latest';
-}
-
-/**
- * The one-line script install command. The master install script reads the
- * version as its first argument: empty = latest stable release, a tag like
- * `v3.4.0` = that release, and `dev-latest` = the rolling per-commit dev build.
- */
-export function buildScriptCommand(options: InstallOptions): string {
-  if (isLatest(options.version)) {
-    return `bash <(curl -Ls ${REPO_RAW})`;
-  }
-  return `bash <(curl -Ls ${REPO_RAW}) ${options.version.trim()}`;
+/** This branch deploys one maintained preset, independent of upstream latest. */
+export function buildScriptCommand(_options: InstallOptions): string {
+  return `bash <(curl -fLsS ${REPO_RAW})`;
 }
 
 /** A `docker run` command reflecting the chosen options. */
 export function buildDockerRun(options: InstallOptions): string {
   const lines = ['docker run -itd'];
+  if (options.enableFail2ban) {
+    lines.push('  --cap-add=NET_ADMIN');
+    lines.push('  --cap-add=NET_RAW');
+  }
   lines.push(`  -e XRAY_VMESS_AEAD_FORCED=false`);
   lines.push(`  -e XUI_ENABLE_FAIL2BAN=${options.enableFail2ban ? 'true' : 'false'}`);
   if (options.panelPort.trim()) lines.push(`  -e XUI_PORT=${options.panelPort.trim()}`);
@@ -45,7 +38,7 @@ export function buildDockerRun(options: InstallOptions): string {
   lines.push(`  --restart=unless-stopped`);
   lines.push(`  --name 3x-ui`);
   lines.push(`  ${IMAGE}`);
-  return lines.join(' \\\n');
+  return `docker build -t ${IMAGE} ${SOURCE}\n\n` + lines.join(' \\\n');
 }
 
 /** A `docker-compose.yml` reflecting the chosen options. */
@@ -62,6 +55,9 @@ export function buildDockerCompose(options: InstallOptions): string {
     `services:`,
     `  3x-ui:`,
     `    image: ${IMAGE}`,
+    `    pull_policy: build`,
+    `    build: ${SOURCE}`,
+    ...(options.enableFail2ban ? [`    cap_add: [NET_ADMIN, NET_RAW]`] : []),
     `    container_name: 3x-ui`,
     `    volumes:`,
     `      - ./db/:/etc/x-ui/`,
