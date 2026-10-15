@@ -5,9 +5,10 @@ import (
 	"net"
 	"testing"
 
+	"github.com/xtls/xray-core/infra/conf"
+
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
-	"github.com/xtls/xray-core/infra/conf"
 )
 
 func TestTutorialPresetCreatesTwoUsableSubscriptionNodes(t *testing.T) {
@@ -268,11 +269,13 @@ func TestTutorialPresetRejectsMicrosoftServerNames(t *testing.T) {
 func TestTutorialPresetChoosesFastestFeasibleNonMicrosoftTarget(t *testing.T) {
 	valid := &RealityScanResult{Host: "www.samsung.com", Target: "www.samsung.com:443", Feasible: true, LatencyMs: 12}
 	cases := []*RealityScanResult{
-		nil, {Host: "www.microsoft.com", Feasible: true, LatencyMs: 1},
+		nil,
+		{Host: "www.microsoft.com", Feasible: true, LatencyMs: 1},
 		{Host: "login.live.com", Feasible: true, LatencyMs: 1},
 		{Host: "unreachable.example", Feasible: false, LatencyMs: 0},
 		{Host: "private.example", Feasible: true, PrivateTarget: true, LatencyMs: 1},
-		{Host: "slower.example", Feasible: true, LatencyMs: 120}, valid,
+		{Host: "slower.example", Feasible: true, LatencyMs: 120},
+		valid,
 	}
 	selected, err := tutorialSelectRealityTarget(cases)
 	if err != nil || selected != valid {

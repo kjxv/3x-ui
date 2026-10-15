@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
@@ -14,10 +15,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
+
 	"github.com/mhsanaei/3x-ui/v3/internal/config"
 	"github.com/mhsanaei/3x-ui/v3/internal/database"
 	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
-	"gorm.io/gorm"
 )
 
 var ErrTutorialPresetNonEmpty = errors.New("preset requires an empty panel; existing nodes and clients were preserved")
@@ -172,8 +174,10 @@ func ApplyTutorialPreset(opts TutorialPresetOptions) (*TutorialPresetResult, err
 		}
 		now := time.Now().UnixMilli()
 		// One portable client identity is attached to both tutorial inbounds.
-		client := model.Client{ID: uuid.NewString(), Email: "01", Flow: "xtls-rprx-vision",
-			SubID: subID, Enable: true, CreatedAt: now, UpdatedAt: now}
+		client := model.Client{
+			ID: uuid.NewString(), Email: "01", Flow: "xtls-rprx-vision",
+			SubID: subID, Enable: true, CreatedAt: now, UpdatedAt: now,
+		}
 		var owner model.User
 		if err := tx.Order("id").First(&owner).Error; err != nil {
 			return err
@@ -193,10 +197,12 @@ func ApplyTutorialPreset(opts TutorialPresetOptions) (*TutorialPresetResult, err
 			if err != nil {
 				return err
 			}
-			inbound := &model.Inbound{UserId: owner.Id, Enable: true, Listen: "0.0.0.0", Port: definition.port,
+			inbound := &model.Inbound{
+				UserId: owner.Id, Enable: true, Listen: "0.0.0.0", Port: definition.port,
 				Protocol: model.VLESS, Tag: definition.tag, Remark: definition.name, Settings: string(settings),
 				StreamSettings: stream, SubSortIndex: index + 1, TrafficReset: "never", TrafficResetDay: 1,
-				ShareAddrStrategy: "node", Sniffing: `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`}
+				ShareAddrStrategy: "node", Sniffing: `{"enabled":true,"destOverride":["http","tls","quic"],"routeOnly":true}`,
+			}
 			if opts.PublicAddress != "" {
 				inbound.ShareAddrStrategy = "custom"
 				inbound.ShareAddr = opts.PublicAddress
@@ -211,8 +217,10 @@ func ApplyTutorialPreset(opts TutorialPresetOptions) (*TutorialPresetResult, err
 				return err
 			}
 		}
-		values := map[string]string{"xrayTemplateConfig": string(encodedTemplate), "subEnable": "true",
-			"subClashEnable": "true", "devChannelEnable": "false", "remarkTemplate": "{{INBOUND}}"}
+		values := map[string]string{
+			"xrayTemplateConfig": string(encodedTemplate), "subEnable": "true",
+			"subClashEnable": "true", "devChannelEnable": "false", "remarkTemplate": "{{INBOUND}}",
+		}
 		if cert != "" && key != "" {
 			values["subCertFile"] = cert
 			values["subKeyFile"] = key
@@ -252,7 +260,7 @@ func validateTutorialPresetOptions(opts TutorialPresetOptions) error {
 			return errors.New("preset address must be an IP or hostname without a port or URL scheme")
 		}
 		for _, ch := range host {
-			if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '.' || ch == '-') {
+			if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-", ch) {
 				return errors.New("invalid preset hostname")
 			}
 		}
@@ -283,6 +291,7 @@ func tutorialMicrosoftServerName(serverName string) bool {
 }
 
 func tutorialPresetPort(requested int, preferred []int, used map[int]bool) (int, error) {
+	var listenerConfig net.ListenConfig
 	candidates := preferred
 	if requested != 0 {
 		candidates = []int{requested}
@@ -291,7 +300,7 @@ func tutorialPresetPort(requested int, preferred []int, used map[int]bool) (int,
 		if used[port] {
 			continue
 		}
-		listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)))
+		listener, err := listenerConfig.Listen(context.Background(), "tcp", net.JoinHostPort("0.0.0.0", strconv.Itoa(port)))
 		if err == nil {
 			_ = listener.Close()
 			return port, nil
@@ -301,7 +310,7 @@ func tutorialPresetPort(requested int, preferred []int, used map[int]bool) (int,
 		return 0, fmt.Errorf("preset port %d is already in use", requested)
 	}
 	for range 64 {
-		listener, err := net.Listen("tcp", "0.0.0.0:0")
+		listener, err := listenerConfig.Listen(context.Background(), "tcp", "0.0.0.0:0")
 		if err != nil {
 			return 0, err
 		}
@@ -333,9 +342,11 @@ func tutorialRealityStream(serverName string) (string, error) {
 	}
 	stream, err := json.Marshal(map[string]any{
 		"network": "tcp", "security": "reality", "tcpSettings": map[string]any{"header": map[string]any{"type": "none"}},
-		"realitySettings": map[string]any{"show": false, "target": net.JoinHostPort(serverName, "443"), "xver": 0, "minClientVer": "1.0.0",
+		"realitySettings": map[string]any{
+			"show": false, "target": net.JoinHostPort(serverName, "443"), "xver": 0, "minClientVer": "1.0.0",
 			"serverNames": []string{serverName}, "privateKey": base64.RawURLEncoding.EncodeToString(key.Bytes()), "shortIds": []string{shortID},
-			"settings": map[string]any{"publicKey": base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), "fingerprint": "chrome", "serverName": serverName, "spiderX": "/"}},
+			"settings": map[string]any{"publicKey": base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes()), "fingerprint": "chrome", "serverName": serverName, "spiderX": "/"},
+		},
 	})
 	return string(stream), err
 }
